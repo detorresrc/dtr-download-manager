@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grab</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        width: 320px;
+        margin: 0;
+        padding: 14px;
+      }
+      h1 { font-size: 15px; margin: 0 0 10px; }
+      .row { display: flex; gap: 6px; margin-bottom: 10px; }
+      input[type="text"] {
+        flex: 1;
+        padding: 7px 8px;
+        border: 1px solid #8884;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      button {
+        padding: 7px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: #2d6cdf;
+        color: #fff;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:hover { background: #2559bd; }
+      fieldset { border: 1px solid #8884; border-radius: 8px; margin: 0 0 10px; }
+      legend { font-size: 12px; color: #888; }
+      label { display: block; font-size: 12px; margin: 6px 0 2px; }
+      .small { font-size: 11px; color: #888; }
+      #status { font-size: 12px; min-height: 16px; color: #2d8a4e; }
+    </style>
+  </head>
+  <body>
+    <h1>Grab Download Manager</h1>
+
+    <div class="row">
+      <input id="url" type="text" placeholder="Paste a URL to download…" />
+      <button id="go">Download</button>
+    </div>
+
+    <fieldset>
+      <legend>Settings</legend>
+      <label for="dir">Download folder</label>
+      <input id="dir" type="text" placeholder="(leave blank for default)" />
+      <label for="conns">Max connections per file</label>
+      <input id="conns" type="text" placeholder="8" />
+      <label for="concurrent">Max concurrent downloads</label>
+      <input id="concurrent" type="text" placeholder="4" />
+      <div class="row" style="margin-top: 8px">
+        <button id="save">Save settings</button>
+      </div>
+      <div class="small">Settings are stored by the Grab desktop app.</div>
+    </fieldset>
+
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+# Rust
+/target
+**/target
+Cargo.lock
+
+# Local cargo home used in sandbox
+/.cargo
+
+# Tauri / Node
+node_modules
+dist
+app/src-tauri/target
+
+# Smoke-test output
+grab-smoke-out
+
+# OS
+.DS_Store
+Thumbs.db

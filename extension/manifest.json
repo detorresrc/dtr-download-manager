@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Grab Download Manager",
+  "version": "0.1.0",
+  "description": "Send downloads to the Grab desktop app for fast, multi-connection downloading.",
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "contextMenus",
+    "cookies",
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Grab Download Manager",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
