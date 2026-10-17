@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grab Download Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Grab</h1>
+      <button id="settings-btn" class="ghost" title="Settings">⚙</button>
+    </header>
+
+    <section class="add-bar">
+      <input id="url-input" type="text" placeholder="Paste a URL to download…" />
+      <button id="add-btn">Download</button>
+    </section>
+
+    <section id="downloads" class="downloads">
+      <p id="empty" class="empty">No downloads yet. Paste a URL above to begin.</p>
+    </section>
+
+    <!-- Settings dialog -->
+    <dialog id="settings-dialog">
+      <form method="dialog">
+        <h2>Settings</h2>
+        <label>Download folder</label>
+        <div class="row">
+          <input id="s-dir" type="text" />
+          <button id="s-browse" type="button" class="ghost">Browse…</button>
+        </div>
+        <label>Max connections per file</label>
+        <input id="s-conns" type="number" min="1" max="32" />
+        <label>Max concurrent downloads</label>
+        <input id="s-concurrent" type="number" min="1" max="20" />
+        <div class="row end">
+          <button value="cancel" class="ghost">Cancel</button>
+          <button id="s-save" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

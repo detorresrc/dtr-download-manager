@@ -57,6 +57,8 @@ the Tauri app.
 
 Requires a recent stable Rust toolchain.
 
+### Engine + native host (no GUI deps)
+
 ```bash
 # Engine + host
 cargo build --release -p grab-host
@@ -67,6 +69,35 @@ cargo test -p grab-engine
 # Live end-to-end smoke test (downloads a real file and verifies it)
 cargo run -p grab-engine --example smoke
 ```
+
+### Desktop app (Tauri)
+
+The GUI needs the Tauri CLI and platform WebView libraries.
+
+```bash
+# One-time: install the Tauri CLI
+npm install -g @tauri-apps/cli    # or: cargo install tauri-cli --version '^2'
+
+cd app
+npm install        # installs @tauri-apps/cli locally
+npm run dev        # run the app in development
+npm run build      # produce a bundled installer
+```
+
+**Linux build prerequisites** (Debian/Ubuntu example):
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev build-essential
+```
+
+On Fedora: `webkit2gtk4.1-devel gtk3-devel`. On Windows: the Microsoft
+Edge WebView2 runtime (preinstalled on Windows 11) and the MSVC build tools.
+
+> Note: the app was developed in a headless CI sandbox without WebView
+> libraries, so the GUI must be built/run on a real desktop. The engine and
+> native host are fully tested there; the Tauri layer is a thin wrapper around
+> the verified `grab-engine` API.
 
 ## Install the browser integration
 
