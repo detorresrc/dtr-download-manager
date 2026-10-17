@@ -5,7 +5,10 @@
 
 pub mod download;
 pub mod manager;
+pub mod media;
+pub mod media_download;
 pub mod probe;
+pub mod registry;
 pub mod segment;
 pub mod state;
 pub mod types;
@@ -13,6 +16,9 @@ pub mod types;
 pub use download::{download, Handle};
 pub use manager::Manager;
 pub use probe::probe;
+pub use registry::Registry;
 pub use segment::{plan, Segment};
 pub use state::DownloadState;
-pub use types::{DownloadRequest, Progress, ProbeResult, Settings, Status};
+pub use types::{
+    DownloadKind, DownloadRecord, DownloadRequest, Progress, ProbeResult, Settings, Status,
+};

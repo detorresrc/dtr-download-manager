@@ -54,10 +54,13 @@ impl Handle {
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
     }
-    fn is_paused(&self) -> bool {
+    /// Whether a pause has been requested (public so other download strategies
+    /// like the media downloader can honor it).
+    pub fn is_paused(&self) -> bool {
         self.pause.load(Ordering::SeqCst)
     }
-    fn is_canceled(&self) -> bool {
+    /// Whether a cancel has been requested.
+    pub fn is_canceled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
 }
@@ -80,6 +83,24 @@ pub async fn download(
     handle: Handle,
     tx: mpsc::UnboundedSender<Progress>,
 ) -> Result<PathBuf> {
+    download_with_target_sink(client, id, req, settings, handle, tx, None).await
+}
+
+/// Type of the optional callback invoked once with the resolved output path, so
+/// a caller (the Manager) can persist it for deterministic resume.
+pub type TargetSink = std::sync::Arc<dyn Fn(PathBuf) + Send + Sync>;
+
+/// Like [`download`], but also reports the resolved target path to `target_sink`
+/// as soon as it's known (before bytes are written).
+pub async fn download_with_target_sink(
+    client: Client,
+    id: String,
+    req: DownloadRequest,
+    settings: Settings,
+    handle: Handle,
+    tx: mpsc::UnboundedSender<Progress>,
+    target_sink: Option<TargetSink>,
+) -> Result<PathBuf> {
     let emit = |status: Status, downloaded: u64, total: Option<u64>, speed: u64, conns: usize, err: Option<String>| {
         let _ = tx.send(Progress {
             id: id.clone(),
@@ -92,18 +113,43 @@ pub async fn download(
         });
     };
 
+    // Streaming media (HLS/DASH) follows an entirely different path: fetch and
+    // parse a manifest, then download+concatenate its segments.
+    if matches!(
+        req.effective_kind(),
+        crate::types::DownloadKind::Hls | crate::types::DownloadKind::Dash
+    ) {
+        return crate::media_download::download_media(
+            client, id, req, settings, handle, tx, target_sink,
+        )
+        .await;
+    }
+
     emit(Status::Probing, 0, None, 0, 0, None);
     let probe_result = probe(&client, &req).await?;
 
-    // Decide target directory and filename, handling collisions.
-    let dir = req
-        .save_dir
-        .clone()
-        .unwrap_or_else(|| settings.download_dir.clone());
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .with_context(|| format!("creating download dir {}", dir.display()))?;
-    let target = unique_path(&dir, &probe_result.filename).await;
+    // Resolve the output path. When resuming, the caller passes the exact path
+    // via `resolved_target` so we write to the SAME file; otherwise we resolve
+    // dir + filename and avoid collisions.
+    let target = if let Some(t) = req.resolved_target.clone() {
+        if let Some(parent) = t.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+        t
+    } else {
+        let dir = req
+            .save_dir
+            .clone()
+            .unwrap_or_else(|| settings.download_dir.clone());
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .with_context(|| format!("creating download dir {}", dir.display()))?;
+        unique_path(&dir, &probe_result.filename).await
+    };
+    // Report the resolved path so it can be persisted for resume.
+    if let Some(sink) = &target_sink {
+        sink(target.clone());
+    }
 
     let state_path = state_path_for(&target);
 
@@ -380,6 +426,17 @@ async fn fetch_segment(
         offset += n;
         downloaded.fetch_add(n, Ordering::SeqCst);
         progress.lock().await.add(idx, n);
+    }
+    // The stream ended. If we didn't reach the end of the segment, the server
+    // closed the connection early (short read). Treating this as success would
+    // leave an unwritten gap in the file, so fail loudly — the download will be
+    // marked failed and can be resumed (the bytes we did write are checkpointed).
+    if offset <= limit {
+        anyhow::bail!(
+            "segment {idx} ended early at offset {offset}, expected through {limit} \
+             (server closed connection; {} bytes short)",
+            limit - offset + 1
+        );
     }
     Ok(())
 }

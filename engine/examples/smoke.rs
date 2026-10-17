@@ -38,6 +38,8 @@ async fn main() -> anyhow::Result<()> {
             filename: None,
             headers: Default::default(),
             save_dir: None,
+            kind: None,
+            resolved_target: None,
         },
     )
     .await?;
@@ -54,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
         filename: None,
         headers: Default::default(),
         save_dir: None,
+        kind: None,
+            resolved_target: None,
     };
     let id = manager.enqueue(req).await;
     println!("enqueued {id} -> {url}");

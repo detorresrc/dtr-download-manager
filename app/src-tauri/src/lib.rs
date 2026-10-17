@@ -1,7 +1,7 @@
 //! Grab desktop app backend. Wraps `grab-engine` and exposes it to the web
 //! frontend via Tauri commands, streaming progress back as `progress` events.
 
-use grab_engine::{DownloadRequest, Manager, Progress, Settings};
+use grab_engine::{DownloadKind, DownloadRecord, DownloadRequest, Manager, Progress, Settings};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager as _, State};
@@ -19,15 +19,37 @@ async fn start_download(
     url: String,
     filename: Option<String>,
     save_dir: Option<String>,
+    kind: Option<String>,
 ) -> Result<String, String> {
+    let kind = kind.and_then(|k| match k.to_ascii_lowercase().as_str() {
+        "hls" => Some(DownloadKind::Hls),
+        "dash" => Some(DownloadKind::Dash),
+        "file" => Some(DownloadKind::File),
+        _ => None,
+    });
     let req = DownloadRequest {
         url,
         filename,
         headers: Default::default(),
         save_dir: save_dir.map(PathBuf::from),
+        kind,
+        resolved_target: None,
     };
     let manager = state.manager.lock().await;
     Ok(manager.enqueue(req).await)
+}
+
+#[tauri::command]
+async fn list_downloads(state: State<'_, Arc<AppState>>) -> Result<Vec<DownloadRecord>, String> {
+    Ok(state.manager.lock().await.records().await)
+}
+
+#[tauri::command]
+async fn remove(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let manager = state.manager.lock().await;
+    manager.cancel(&id).await;
+    manager.forget(&id).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -73,11 +95,21 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Resolve where settings live (shared with the native host format).
+            // Resolve where settings + queue live (shared with the host format).
             let settings_path = config_dir().join("settings.json");
+            let queue_path = config_dir().join("queue.json");
             let settings = load_settings(&settings_path);
 
-            let (manager, mut progress_rx) = Manager::new(settings);
+            // Build a persistent manager and restore unfinished downloads.
+            let (manager, mut progress_rx) = tauri::async_runtime::block_on(async {
+                let (m, rx) = Manager::with_persistence(settings, queue_path).await;
+                let restored = m.restore().await;
+                if !restored.is_empty() {
+                    eprintln!("restored {} unfinished download(s)", restored.len());
+                }
+                (m, rx)
+            });
+
             let state = Arc::new(AppState {
                 manager: Mutex::new(manager),
                 settings_path,
@@ -99,7 +131,9 @@ pub fn run() {
             resume,
             cancel,
             get_settings,
-            save_settings
+            save_settings,
+            list_downloads,
+            remove
         ])
         .run(tauri::generate_context!())
         .expect("error while running Grab");

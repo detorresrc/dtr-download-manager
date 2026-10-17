@@ -12,11 +12,11 @@ fallback to a single connection when the server doesn't support ranges.
 
 | Component | State |
 |-----------|-------|
-| `engine/` — segmented download engine (Rust library) | ✅ working, tested (unit + live end-to-end) |
+| `engine/` — segmented engine + queue persistence + HLS/DASH | ✅ working, tested (unit + live end-to-end) |
 | `host/` — native messaging host (Chrome ⇄ engine) | ✅ working, protocol verified |
 | `extension/` — Chrome MV3 extension | ✅ built (syntax-validated; load to test in Chrome) |
 | `scripts/` — host installers (Linux + Windows) | ✅ |
-| `app/` — Tauri 2 desktop GUI | 🚧 in progress |
+| `app/` — Tauri 2 desktop GUI | ✅ code complete (build on a desktop) |
 | Firefox extension | ⏳ planned |
 
 ## Features
@@ -28,12 +28,38 @@ fallback to a single connection when the server doesn't support ranges.
   download folder (global + per-request override).
 - **Pause / resume / cancel**, including crash-safe resume (validated against
   the server's size + ETag so you never stitch together mismatched bytes).
+- **Persistent download queue** — the list of downloads is saved to disk, so it
+  survives app/host restarts. Unfinished downloads are automatically re-queued
+  and resumed on startup, writing to the *same* file (no collision copies).
+- **Video / stream capture (HLS & DASH)** — point it at an `.m3u8` or `.mpd`
+  and it parses the manifest, picks the highest-bandwidth rendition, downloads
+  all media segments concurrently, and concatenates them into one file.
 - **Cookie & header forwarding** from the browser, so authenticated/behind-login
   downloads work.
 - **Correct filenames** — parses `Content-Disposition` (incl. RFC 5987),
   URL paths, sanitizes illegal characters, and avoids collisions.
 - **Saves files exactly as served** — requests `Accept-Encoding: identity` so
   byte ranges and on-disk bytes always agree.
+
+### Streaming capture details
+
+- **HLS**: master (multivariant) playlists are resolved to the highest-bandwidth
+  variant; media playlists with `#EXTINF` segments and `#EXT-X-MAP` init segments
+  are supported. Output is the raw MPEG-TS or fMP4 segment concatenation (a valid,
+  playable stream).
+- **DASH**: `SegmentTemplate` with `$Number$` / `$RepresentationID$`
+  substitution, `initialization`, `startNumber`, `SegmentTimeline`, and
+  `BaseURL`; highest-`bandwidth` `Representation` is chosen.
+- **Known limitations** (reported as errors, not silent corruption): HLS
+  AES-128 / SAMPLE-AES decryption is not performed; DASH live/dynamic manifests
+  are treated as their current snapshot; segments aren't remuxed into MP4.
+
+### Queue persistence details
+
+The queue lives at `~/.config/grab/queue.json` (Linux) / `%APPDATA%\grab\queue.json`
+(Windows). Each record stores the request, resolved target path, and last known
+status. Byte-level resume continues to use the per-file `.grabpart` sidecar next
+to each output file.
 
 ## Architecture
 

@@ -20,8 +20,9 @@ async function addDownload() {
     flash(urlInput);
     return;
   }
+  const kind = document.getElementById("kind-select").value || null;
   try {
-    const id = await invoke("start_download", { url });
+    const id = await invoke("start_download", { url, kind });
     const name = guessName(url);
     createItem(id, name);
     urlInput.value = "";
@@ -52,13 +53,44 @@ function createItem(id, name) {
       <button class="ghost" data-act="pause">Pause</button>
       <button class="ghost" data-act="resume">Resume</button>
       <button class="ghost" data-act="cancel">Cancel</button>
+      <button class="ghost" data-act="remove">Remove</button>
     </div>`;
   el.querySelector(".name").textContent = name;
   el.querySelector('[data-act="pause"]').onclick = () => invoke("pause", { id });
   el.querySelector('[data-act="resume"]').onclick = () => invoke("resume", { id });
   el.querySelector('[data-act="cancel"]').onclick = () => invoke("cancel", { id });
+  el.querySelector('[data-act="remove"]').onclick = async () => {
+    await invoke("remove", { id });
+    el.remove();
+    downloads.delete(id);
+    if (downloads.size === 0) empty.style.display = "";
+  };
   list.appendChild(el);
   downloads.set(id, { el, name });
+}
+
+// Repopulate the list from the persisted queue on startup.
+async function restoreList() {
+  try {
+    const records = await invoke("list_downloads");
+    for (const r of records) {
+      const name = r.target
+        ? r.target.split(/[\\/]/).pop()
+        : guessName(r.request.url);
+      createItem(r.id, name);
+      updateItem({
+        id: r.id,
+        status: r.status,
+        downloaded: r.downloaded || 0,
+        total: r.total,
+        speed: 0,
+        connections: 0,
+        error: r.error,
+      });
+    }
+  } catch (e) {
+    console.warn("Could not load saved downloads:", e);
+  }
 }
 
 function updateItem(p) {
@@ -92,6 +124,9 @@ function updateItem(p) {
 }
 
 listen("progress", (event) => updateItem(event.payload));
+
+// Load any downloads persisted from a previous session.
+restoreList();
 
 // ---- Settings ---------------------------------------------------------------
 

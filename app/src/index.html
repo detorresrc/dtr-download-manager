@@ -13,7 +13,13 @@
     </header>
 
     <section class="add-bar">
-      <input id="url-input" type="text" placeholder="Paste a URL to download…" />
+      <input id="url-input" type="text" placeholder="Paste a URL (file, .m3u8, or .mpd)…" />
+      <select id="kind-select" title="Download type">
+        <option value="">Auto</option>
+        <option value="file">File</option>
+        <option value="hls">HLS (.m3u8)</option>
+        <option value="dash">DASH (.mpd)</option>
+      </select>
       <button id="add-btn">Download</button>
     </section>
 
