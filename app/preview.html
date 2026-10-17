@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grab Download Manager — UI preview</title>
+    <!--
+      STATIC PREVIEW ONLY.
+      This file inlines the real app's CSS (app/src/styles.css) and shows mock
+      download rows so you can see exactly how the Tauri window looks without a
+      desktop/WebView. No backend is wired up; buttons are inert. For the real
+      app: `cd app && npm run dev`.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --accent: #2d6cdf;
+        --accent-hover: #2559bd;
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --border: #e2e4e8;
+        --text: #1a1c1f;
+        --muted: #8a8f98;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #15171a;
+          --card: #1e2125;
+          --border: #2c3036;
+          --text: #e7e9ec;
+          --muted: #8a8f98;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 { font-size: 18px; margin: 0; color: var(--accent); }
+      .add-bar { display: flex; gap: 8px; padding: 14px 18px; }
+      .add-bar input {
+        flex: 1; padding: 9px 11px; border: 1px solid var(--border);
+        border-radius: 8px; background: var(--card); color: var(--text); font-size: 14px;
+      }
+      .add-bar select {
+        padding: 9px 8px; border: 1px solid var(--border); border-radius: 8px;
+        background: var(--card); color: var(--text); font-size: 14px;
+      }
+      button {
+        padding: 9px 16px; border: 0; border-radius: 8px; background: var(--accent);
+        color: #fff; font-size: 14px; cursor: pointer;
+      }
+      button:hover { background: var(--accent-hover); }
+      button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+      button.ghost:hover { background: #8881; }
+      .downloads { padding: 0 18px 18px; }
+      .empty { color: var(--muted); text-align: center; margin-top: 40px; }
+      .item {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+      }
+      .item .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+      .item .name { font-weight: 600; font-size: 14px; word-break: break-all; }
+      .item .status { font-size: 12px; color: var(--muted); white-space: nowrap; }
+      .bar { height: 8px; background: #8882; border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+      .bar > span { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.25s ease; }
+      .item .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+      .item .actions { display: flex; gap: 6px; margin-top: 8px; }
+      .item .actions button { padding: 5px 10px; font-size: 12px; }
+      .status.failed { color: #e25555; }
+      .status.completed { color: #2d8a4e; }
+
+      /* Preview-only chrome: a framed "window" + a mode toggle. Not in the real app. */
+      .preview-note {
+        max-width: 900px; margin: 14px auto 0; padding: 8px 14px;
+        font-size: 12px; color: var(--muted); text-align: center;
+      }
+      .window {
+        max-width: 900px; margin: 10px auto 30px; border: 1px solid var(--border);
+        border-radius: 12px; overflow: hidden; background: var(--bg);
+        box-shadow: 0 10px 40px #0003;
+      }
+      .titlebar {
+        display: flex; align-items: center; gap: 7px; padding: 8px 12px;
+        background: var(--card); border-bottom: 1px solid var(--border);
+      }
+      .dot { width: 11px; height: 11px; border-radius: 50%; }
+      .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+      .titlebar span { font-size: 12px; color: var(--muted); margin-left: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="preview-note">
+      Static preview of the Grab desktop app (mock data, inert buttons). Toggle your
+      OS light/dark mode to see both themes. Real app: <code>cd app &amp;&amp; npm run dev</code>.
+    </div>
+
+    <div class="window">
+      <div class="titlebar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span>Grab Download Manager</span>
+      </div>
+
+      <header>
+        <h1>Grab</h1>
+        <button class="ghost" title="Settings">⚙</button>
+      </header>
+
+      <section class="add-bar">
+        <input type="text" placeholder="Paste a URL (file, .m3u8, or .mpd)…" />
+        <select>
+          <option>Auto</option>
+          <option>File</option>
+          <option>HLS (.m3u8)</option>
+          <option>DASH (.mpd)</option>
+        </select>
+        <button>Download</button>
+      </section>
+
+      <section class="downloads">
+        <!-- Active multi-connection file download -->
+        <div class="item">
+          <div class="top">
+            <span class="name">ubuntu-24.04.1-desktop-amd64.iso</span>
+            <span class="status">downloading · 8 conn</span>
+          </div>
+          <div class="bar"><span style="width: 62%"></span></div>
+          <div class="meta"><span>3.1 GB / 5.0 GB (62%)</span><span>42.6 MB/s</span></div>
+          <div class="actions">
+            <button class="ghost">Pause</button>
+            <button class="ghost">Resume</button>
+            <button class="ghost">Cancel</button>
+            <button class="ghost">Remove</button>
+          </div>
+        </div>
+
+        <!-- HLS stream capture (progress by segment count) -->
+        <div class="item">
+          <div class="top">
+            <span class="name">mux-test.ts</span>
+            <span class="status">downloading · HLS</span>
+          </div>
+          <div class="bar"><span style="width: 56%"></span></div>
+          <div class="meta"><span>36 / 64 segments (56%)</span><span>18.2 MB/s</span></div>
+          <div class="actions">
+            <button class="ghost">Pause</button>
+            <button class="ghost">Resume</button>
+            <button class="ghost">Cancel</button>
+            <button class="ghost">Remove</button>
+          </div>
+        </div>
+
+        <!-- Paused download -->
+        <div class="item">
+          <div class="top">
+            <span class="name">dataset-2026.tar.gz</span>
+            <span class="status">paused</span>
+          </div>
+          <div class="bar"><span style="width: 23%"></span></div>
+          <div class="meta"><span>211 MB / 912 MB (23%)</span><span></span></div>
+          <div class="actions">
+            <button class="ghost">Pause</button>
+            <button class="ghost">Resume</button>
+            <button class="ghost">Cancel</button>
+            <button class="ghost">Remove</button>
+          </div>
+        </div>
+
+        <!-- Completed -->
+        <div class="item">
+          <div class="top">
+            <span class="name">rust-1.80.0-README.md</span>
+            <span class="status completed">completed</span>
+          </div>
+          <div class="bar"><span style="width: 100%"></span></div>
+          <div class="meta"><span>3.1 KB / 3.1 KB (100%)</span><span></span></div>
+          <div class="actions">
+            <button class="ghost">Pause</button>
+            <button class="ghost">Resume</button>
+            <button class="ghost">Cancel</button>
+            <button class="ghost">Remove</button>
+          </div>
+        </div>
+
+        <!-- Failed -->
+        <div class="item">
+          <div class="top">
+            <span class="name">private-stream.m3u8</span>
+            <span class="status failed">failed</span>
+          </div>
+          <div class="bar"><span style="width: 0%"></span></div>
+          <div class="meta"><span>Error: the stream is encrypted (HLS AES-128 is not supported)</span><span></span></div>
+          <div class="actions">
+            <button class="ghost">Pause</button>
+            <button class="ghost">Resume</button>
+            <button class="ghost">Cancel</button>
+            <button class="ghost">Remove</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Settings dialog, rendered inline so you can see it too -->
+    <div class="window" style="max-width: 400px">
+      <div class="titlebar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span>Settings dialog</span>
+      </div>
+      <div style="padding: 18px; background: var(--card);">
+        <h2 style="margin: 0 0 12px; font-size: 16px;">Settings</h2>
+        <label style="display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;">Download folder</label>
+        <div class="row" style="display:flex;gap:8px;">
+          <input style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);" value="/home/you/Downloads" />
+          <button class="ghost">Browse…</button>
+        </div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;">Max connections per file</label>
+        <input style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);" value="8" />
+        <label style="display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;">Max concurrent downloads</label>
+        <input style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);" value="4" />
+        <div class="row end" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+          <button class="ghost">Cancel</button>
+          <button>Save</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
