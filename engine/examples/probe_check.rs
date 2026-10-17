@@ -15,6 +15,8 @@ async fn main() -> anyhow::Result<()> {
         filename: None,
         headers: Default::default(),
         save_dir: None,
+        kind: None,
+            resolved_target: None,
     };
     let r = tokio::time::timeout(std::time::Duration::from_secs(20), probe(&client, &req)).await??;
     println!("final_url     = {}", r.final_url);

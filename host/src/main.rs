@@ -25,7 +25,7 @@
 //!   { "type": "pong" }
 //!   { "type": "error", "message": "..." }
 
-use grab_engine::{DownloadRequest, Manager, Progress, Settings};
+use grab_engine::{DownloadKind, DownloadRequest, Manager, Progress, Settings};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -44,6 +44,9 @@ enum Incoming {
         headers: HashMap<String, String>,
         #[serde(default)]
         save_dir: Option<PathBuf>,
+        /// Optional explicit kind ("file" | "hls" | "dash"); guessed if absent.
+        #[serde(default)]
+        kind: Option<DownloadKind>,
     },
     Pause {
         id: String,
@@ -52,6 +55,12 @@ enum Incoming {
         id: String,
     },
     Cancel {
+        id: String,
+    },
+    /// List all persisted downloads (the queue, including history).
+    List,
+    /// Remove a download from the persistent queue.
+    Remove {
         id: String,
     },
     Settings {
@@ -86,7 +95,16 @@ fn main() {
 async fn run() -> anyhow::Result<()> {
     let settings = load_settings();
     tracing::info!("settings: {:?}", settings);
-    let (manager, mut progress_rx) = Manager::new(settings);
+    // Persist the queue so downloads survive host restarts.
+    let queue_path = config_dir().join("queue.json");
+    let (manager, mut progress_rx) =
+        Manager::with_persistence(settings, queue_path).await;
+    // Re-enqueue anything left unfinished last time (byte-level resume is
+    // handled per-file via .grabpart sidecars).
+    let restored = manager.restore().await;
+    if !restored.is_empty() {
+        tracing::info!("restored {} unfinished download(s)", restored.len());
+    }
 
     // Forward engine progress events to the extension over stdout.
     // stdout isn't Send-friendly to share, so we funnel everything through one
@@ -167,12 +185,15 @@ async fn handle_message(
             filename,
             headers,
             save_dir,
+            kind,
         } => {
             let req = DownloadRequest {
                 url,
                 filename,
                 headers,
                 save_dir,
+                kind,
+                resolved_target: None,
             };
             let id = manager.enqueue(req).await;
             tracing::info!("enqueued {id}");
@@ -181,6 +202,16 @@ async fn handle_message(
         Incoming::Pause { id } => manager.pause(&id).await,
         Incoming::Resume { id } => manager.resume(&id).await,
         Incoming::Cancel { id } => manager.cancel(&id).await,
+        Incoming::List => {
+            let records = manager.records().await;
+            let _ = out.send(serde_json::json!({ "type": "list", "downloads": records }));
+        }
+        Incoming::Remove { id } => {
+            // Stop it if running, then drop it from the persistent queue.
+            manager.cancel(&id).await;
+            manager.forget(&id).await;
+            let _ = out.send(serde_json::json!({ "type": "removed", "id": id }));
+        }
         Incoming::Settings {
             download_dir,
             max_connections_per_file,

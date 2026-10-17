@@ -49,6 +49,14 @@ header h1 { font-size: 18px; margin: 0; color: var(--accent); }
   color: var(--text);
   font-size: 14px;
 }
+.add-bar select {
+  padding: 9px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+}
 button {
   padding: 9px 16px;
   border: 0;
