@@ -17,7 +17,11 @@ fallback to a single connection when the server doesn't support ranges.
 | `extension/` — Chrome MV3 extension | ✅ built (syntax-validated; load to test in Chrome) |
 | `scripts/` — host installers (Linux + Windows) | ✅ |
 | `app/` — Tauri 2 desktop GUI | ✅ code complete (build on a desktop) |
-| Firefox extension | ⏳ planned |
+| YouTube / site videos (yt-dlp) | ⏳ planned — see [TODO.md](TODO.md) |
+| Firefox extension | ⏳ planned — see [TODO.md](TODO.md) |
+
+> **Planned work** (YouTube/site-video support via yt-dlp, Firefox, speed
+> limiting, HLS/DASH resume, and more) is tracked in **[TODO.md](TODO.md)**.
 
 ## Features
 
