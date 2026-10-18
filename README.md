@@ -39,12 +39,14 @@ CORS is enabled, so any extension (Chrome, Firefox, …) can call it with the to
 
 | Component | State |
 |-----------|-------|
-| `engine/` — segmented engine + queue + HLS/DASH + HTTP API | ✅ working, tested (unit + live) |
-| `app/` — Tauri 2 desktop app (single engine, tray, autostart, HTTP API) | ✅ code complete (build on a desktop) |
-| `extension/` — Chrome MV3 extension (HTTP transport) | ✅ built (validated; load to test in Chrome) |
+| `engine/` — segmented engine + queue + HLS/DASH + HTTP API | ✅ working, tested (51 unit tests + live) |
+| `app/` — Tauri 2 desktop app (single engine, tray, autostart, HTTP API) | ✅ working (confirmed on Linux) |
+| `extension/` — Chrome MV3 extension (HTTP transport + live popup list) | ✅ working (confirmed in Chrome) |
 | YouTube / site videos (yt-dlp) | ⏳ planned — see [TODO.md](TODO.md) |
 | Firefox extension | ⏳ planned (now trivial — same HTTP API) |
 
+> The whole pipeline has been confirmed end-to-end on Linux (including a large
+> file-host download that survived connection drops via retry/resume).
 > Progress + remaining work is tracked in **[TASKS.md](TASKS.md)**; the longer
 > backlog is in **[TODO.md](TODO.md)**.
 
@@ -59,6 +61,10 @@ CORS is enabled, so any extension (Chrome, Firefox, …) can call it with the to
   **theme** (system / light / dark).
 - **Pause / resume / cancel**, including crash-safe resume (validated against
   the server's size + ETag so you never stitch together mismatched bytes).
+- **Resilient to dropped connections** — if a server drops the connection
+  mid-transfer (common with large files on flaky hosts), the engine retries
+  with backoff and resumes from the exact byte offset — per-segment and for
+  single-stream downloads — instead of failing.
 - **Persistent download queue** — the list of downloads is saved to disk, so it
   survives app restarts. Unfinished downloads are automatically re-queued and
   resumed on startup, writing to the *same* file (no collision copies).

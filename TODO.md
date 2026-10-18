@@ -32,7 +32,8 @@ HLS/DASH; delegate site videos to `yt-dlp`.
         process on cancel; pause = stop + resume later with yt-dlp's `--continue`).
   - [ ] Routes through the persistent queue like every other download.
 - [ ] `download()` routes `SiteVideo` to the new module.
-- [ ] Host (`Incoming::Download`) and Tauri `start_download` accept the new kind.
+- [ ] HTTP API `POST /downloads` + Tauri `start_download` accept the new kind
+      (note: the native-messaging host was removed in the single-engine rewrite).
 - [ ] UI: add "Site video (yt-dlp)" to the type dropdown; show a format picker.
 - [ ] Packaging: document/bundle `yt-dlp` + `ffmpeg` per OS; version-check on start.
 - [ ] Tests: verify binary discovery + progress parsing against recorded
@@ -43,7 +44,7 @@ content the user has rights to, archival). Do NOT add DRM-circumvention features
 Downloading copyrighted YouTube content generally violates YouTube's ToS — make
 that clear in the UI/README.
 
-## 2. Firefox extension  — PLANNED (now trivial)
+## 2. Firefox extension  — PLANNED (now trivial — suggested next)
 
 Since the extension talks to the app over plain HTTP (no native messaging), a
 Firefox port is mostly a manifest variant pointing at the same API.
@@ -53,6 +54,24 @@ Firefox port is mostly a manifest variant pointing at the same API.
       `host_permissions` (same as Chrome).
 - [ ] Reuse the same `background.js`/`options.js`/`popup.js` unchanged.
 - [ ] No host registration needed — just pair the port + token in options.
+
+## 2b. Podcast / RSS-feed downloading  — PLANNED
+
+A legal, legit way to grab audio/video episodes (the recommended alternative to
+DRM-locked services like Spotify).
+
+- [ ] Accept a podcast RSS/Atom feed URL; parse `<enclosure url=... >` entries.
+- [ ] Enqueue selected episodes as normal downloads (direct MP3/M4A URLs).
+- [ ] Optional: a small UI to pick which episodes.
+
+## ❌ NOT doing — Spotify / DRM services
+
+Downloading Spotify (or any Widevine-DRM music/video service) is out of scope:
+the streams are DRM-encrypted and ripping them violates copyright + ToS, and
+circumvention is illegal (DMCA et al.). Do NOT add DRM-stripping or stream-
+ripping. Legal audio alternatives: Bandcamp purchases, Free Music Archive,
+Internet Archive, Jamendo, podcast RSS feeds (above), and yt-dlp for permitted
+content (#1).
 
 ## 3. Speed limiting (enforce `Settings.speed_limit`)  — ✅ DONE
 
@@ -101,8 +120,9 @@ currently restart from the first segment.
 
 ## 5. Smaller improvements
 
-- [ ] Re-apply `max_concurrent_downloads` at runtime (currently the semaphore is
-      fixed at `Manager` creation; changing the setting later has no effect).
+- [ ] Configurable API port in Settings (fixed at 17654 now).
+- [ ] First-run "Start Grab on boot?" prompt (toggle exists in Settings).
+- [ ] "Ask before downloading" review popup (auto-accept is the default).
 - [ ] Checksum verification (user-supplied hash, or `Content-MD5` / digest headers).
 - [ ] Disk-space pre-check before starting a large download.
 - [ ] Clipboard URL monitoring in the app.

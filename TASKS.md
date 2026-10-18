@@ -1,136 +1,129 @@
 # Grab — Task Tracker
 
-Living checklist for the project. `[x]` = done & merged, `[~]` = in progress,
-`[ ]` = not started. "Verified" notes say where a task was actually tested
-(unit test / live test here, or needs-your-Windows-machine).
+Living checklist. `[x]` done & merged, `[~]` partial, `[ ]` not started.
+"Verified" notes say where it was tested: *unit*/*live* (proven in CI here) or
+*needs-desktop* (code done, must be confirmed on a real Linux/Windows GUI).
+
+**Last updated:** after PR #20. Engine: 51 unit tests passing, clippy clean.
+**Repo:** https://github.com/detorresrc/dtr-download-manager
 
 ---
 
-## ✅ Already built (merged to `main`)
+## 🟢 Current state (TL;DR for a new session)
 
-### Core engine (`engine/`)
-- [x] Multi-connection segmented downloader — *verified: live byte-for-byte checksum*
-- [x] Range-support probe + automatic single-connection fallback — *verified: live*
-- [x] Runtime fallback when a server lies (200 instead of 206) — *verified: live*
-- [x] Pause / resume / cancel (cooperative `Handle`) — *verified: live pause→resume→complete, checksum match*
-- [x] Crash-safe resume via `.grabpart` sidecar (ETag/size validated) — *verified: unit + live*
-- [x] Correct filenames (Content-Disposition RFC 5987, URL, sanitize) — *verified: unit*
-- [x] Atomic filename reservation (O_EXCL) — no clobber on concurrent same-name — *verified: live*
-- [x] Persistent download queue (`queue.json`) across restarts — *verified: live crash+resume*
-- [x] Queue file `.bak` recovery + orphaned `.grabpart` reconciliation — *verified: unit*
-- [x] HLS (`.m3u8`) capture — master→best variant, segment concat — *verified: live (64 seg, valid MPEG-TS)*
-- [x] DASH (`.mpd`) capture — SegmentTemplate, highest bandwidth — *verified: unit*
-- [x] Download categories (auto-folder by extension) — *verified: live + unit*
-- [x] Global speed limiting (shared token-bucket) — *verified: live ~throttle*
-- [x] Download speed (smoothed EMA) + ETA — *verified: live*
-- [x] Persist speed/ETA so cross-process rows show stats — *verified: live via host*
-- [x] Multiple named queues + scheduler (concurrency + time windows) — *verified: live concurrency cap*
-- [x] Fixed scheduler double-spawn race — *verified: unit + live*
+Grab is a **working cross-platform download manager** with a **single-engine
+architecture**:
 
-### Current integration (to be replaced in the rewrite)
-- [x] Native messaging host `grab-host` (JSON over stdio) — *WILL BE REMOVED (Phase 4)*
-- [x] Chrome MV3 extension (intercept, cookies, context menu, popup) — *WILL BE REWRITTEN (Phase 3)*
-- [x] Host installer scripts (Linux + Windows) — *WILL BE REMOVED (Phase 4)*
-- [x] Cross-process control channel via `pending_action` in queue.json — *interim; superseded by single engine*
+- The **Tauri desktop app** (`app/`) IS the download engine. It runs a localhost
+  HTTP API, lives in the system tray, and can auto-start on boot.
+- The **Chrome extension** (`extension/`) intercepts downloads and `fetch()`es
+  them to that API (bearer token + CORS). No native-messaging host anymore.
+- The **engine crate** (`engine/`) holds all download logic + the HTTP API
+  (feature `http`), and is fully unit/live tested in CI.
 
-### Tauri desktop app (`app/`)
-- [x] Tauri 2 app wrapping the engine (commands + progress events)
-- [x] UI: download list, progress bars, settings dialog
-- [x] `withGlobalTauri` fix (blank-window bug)
-- [x] Live dashboard polling the shared queue file
-- [x] Theme (system/light/dark); speed/ETA display; queue picker; start/pause-all
+Confirmed working end-to-end on Linux by the user (incl. a 17.8 GB file-host
+download that survived connection drops via retry/resume).
 
-### Build / repo
-- [x] Cargo workspace; app detached as its own workspace (tauri build fix)
-- [x] Valid multi-resolution Windows `.ico` (MSI bundling fix)
-- [x] README, TODO roadmap, static UI preview
+### Layout
+```
+engine/   Rust lib: segmented downloads, queue, HLS/DASH, HTTP API (grep http_api.rs)
+app/      Tauri 2 app = the single engine + tray + autostart + GUI dashboard
+extension/ Chrome MV3 extension (HTTP transport): background.js, popup, options
+scripts/  (host installers were deleted in Phase 4 — dir may be empty)
+TASKS.md / TODO.md / README.md
+```
 
----
+### Build / test (works in CI, no GUI needed for the engine)
+```
+export CARGO_HOME=... (if the default registry is read-only)
+cargo test -p grab-engine                        # 51 unit tests
+cargo run -p grab-engine --example smoke         # live download + checksum
+cargo run -p grab-engine --example http_smoke    # live HTTP API test
+cargo clippy -p grab-engine
+# App (needs a desktop w/ WebView libs — see README):  cd app && npm run build
+```
+> The GUI/extension cannot run in the headless CI sandbox. Engine + HTTP API are
+> fully testable there; tray/autostart/extension round-trip are verified by the
+> user on their machine.
 
-## 🎯 Architecture rewrite: single-engine app + HTTP API
-
-Goal: drop `grab-host.exe`; the Tauri app becomes the single engine, always
-running (tray + autostart), exposing a localhost HTTP API the extension calls.
-
-### Decisions (locked)
-- Transport: **localhost HTTP** `127.0.0.1:17654` (configurable), **bearer token**, **CORS**
-- App-not-running: extension notifies + falls back to Chrome's own download
-- New download: **auto-accept** default + optional "Ask before downloading"
-- Autostart: **opt-in** via first-run prompt
-- Pairing: **manual token paste** (one-time)
+### Workflow conventions used so far
+- Each change = its own branch → PR → merge to `main` (20 PRs merged).
+- `git`/`gh` are pre-configured; open PRs with `gh api repos/.../pulls` (not `gh pr`).
 
 ---
 
-### Phase 1 — HTTP API in the app  `[x]`  (done & verified here)
-- [x] Add `axum` localhost server (in engine crate, feature `http`, reusable by app) — *verified: live*
-- [x] Bearer-token auth (reject all but `/ping` without valid token) — *verified: live 401*
-- [x] CORS: `OPTIONS` preflight + allow headers/methods/origin — *verified: live preflight 200*
-- [x] `GET /ping` → `{ok, version}` (no auth) — *verified: live*
-- [x] `POST /downloads` → `{id}` (url, headers, filename, kind, queue) — *verified: live*
-- [x] `GET /downloads` → `[records]` — *verified: live*
-- [x] `POST /downloads/:id/pause` | `/resume` | `/cancel` — *verified: live*
-- [x] `DELETE /downloads/:id` — *verified: live*
-- [x] Wire the server into `grab-app` startup (done in Phase 2)
-- [x] Generate + persist a random auth token on first run (done in Phase 2)
-- [ ] Port configurable via Settings (small follow-up; fixed 17654 for now)
-- Note: core server + auth + CORS fully proven via `examples/http_smoke.rs`.
+## ✅ Done (all merged to `main`)
 
-### Phase 2 — Tray + lifecycle  `[~]`  (code done; visible behavior = your Windows)
-- [x] Wire HTTP API into app startup (serves on 127.0.0.1:17654)
-- [x] Generate + persist random auth token (`<config>/api_token`); shown in Settings
-- [x] App is now the single engine — calls `restore()` on startup
-- [x] System tray icon + menu (Open · Pause all · Resume all · Quit)
-- [x] Close button → hide to tray (engine + API keep running)
-- [x] `tauri-plugin-single-instance` (second launch focuses running one)
-- [x] `tauri-plugin-autostart` + Settings toggle (`set_autostart`/`is_autostart_enabled`)
-- [x] Start hidden in tray when launched via `--autostarted`
-- [x] Raise/focus window on first progress event of a new download (point 4)
-- [x] Settings UI: autostart toggle + API pairing (URL + token) display
-- [ ] First-run prompt "Start Grab on boot?" — deferred (toggle in Settings for now)
-- [ ] "Ask before downloading" setting + review popup — deferred to Phase 3 polish
-- Note: Tauri 2 API usage reviewed/confirmed; **needs your Windows machine** to
-  verify tray, close-to-tray, autostart, single-instance visually (can't run GUI here).
-- [ ] Make API port configurable in Settings (currently fixed 17654)
+### Engine core (unit + live verified)
+- [x] Multi-connection segmented downloads + single-connection fallback (+ runtime 200-vs-206 fallback)
+- [x] Pause / resume / cancel; crash-safe resume via `.grabpart` sidecar
+- [x] **Retry + resume on dropped connections** — single-stream (5 attempts) AND per-segment (10 attempts), backoff, resumes from exact offset  *(#17, #19)*
+- [x] Correct filename resolution — Content-Disposition (RFC 5987) via probe, hint-with-extension, URL path; rejects opaque proxy tokens  *(#17, #20)*
+- [x] Atomic filename reservation (no clobber on concurrent same-name)
+- [x] Persistent queue (`queue.json`) + `.bak` recovery + orphaned-`.grabpart` reconciliation
+- [x] HLS (.m3u8) + DASH (.mpd) capture (best variant, segment concat)
+- [x] Download categories (auto-folder by extension)
+- [x] Global speed limiting (token bucket); speed + ETA (smoothed)
+- [x] Multiple named queues + scheduler (per-queue concurrency + time windows); fixed double-spawn race  *(#10)*
 
-### Phase 3 — Rework the Chrome extension  `[~]`  (code done; verify in Chrome)
-- [x] Replace native messaging with `fetch()` to the HTTP API — *contract verified here*
-- [x] `host_permissions` for `http://127.0.0.1/*` + `localhost`; dropped `nativeMessaging`
-- [x] Send bearer token; `options.html`/`options.js` to paste/store port + token + "Test connection"
-- [x] Only cancel Chrome's own download AFTER the app accepts the handoff — *fallback intact*
-- [x] App-down: catch fetch error → notify + let Chrome download normally
-- [x] Popup: 🟢/🔴 status via `GET /ping`
-- [x] Keep forwarding cookies/headers/referer + suggested filename
-- Note: manifest + all JS validated; the POST/ping/401 contract exercised against
-  the real server here. **Needs your Chrome to verify the live round-trip.**
+### HTTP API (`engine/src/http_api.rs`, feature `http`) — live verified
+- [x] `GET /ping` (no auth) · `POST/GET /downloads` · `POST /downloads/:id/{pause,resume,cancel}` · `DELETE /downloads/:id`
+- [x] Bearer-token auth (401 without) + CORS (OPTIONS preflight)
 
-### Phase 4 — Remove the old host  `[x]`  (done & verified here)
-- [x] Delete `host/` crate and workspace member — *workspace builds without it*
-- [x] Delete native-messaging manifest template
-- [x] Delete host installer scripts (Linux + Windows)
-- [~] Keep `pending_action` control-channel code — INTENTIONALLY RETAINED: it's
-      harmless, tested, serde-default, and potentially useful (e.g. a future CLI
-      controlling the app via the queue file). Removing it would churn 4 files +
-      3 tests for no functional gain in the single-engine world.
-- [x] Update README (new setup: run app, pair token, no host install)
-- [x] Update TODO/TASKS
+### App (`app/`) — code done; user-confirmed working on Linux
+- [x] Single engine: starts HTTP API on launch, generates/persists `api_token`, calls `restore()`
+- [x] System tray (Open / Pause all / Resume all / Quit); close → hide to tray
+- [x] Autostart plugin + Settings toggle; `--autostarted` starts hidden
+- [x] Single-instance (2nd launch focuses running window)
+- [x] Raise/focus window on new download
+- [x] GUI dashboard: list, progress, speed/ETA, categories, theme, queue picker, start/pause-all, API pairing panel
+- [x] Control commands act on the engine directly (removed dead `pending_action` host-era code)  *(#18)*
+- [x] GUI relabels id-placeholder rows (`dl-2`) with the real filename once known  *(#20)*
+
+### Extension (`extension/`) — HTTP transport; user-confirmed
+- [x] `fetch()` the API with bearer token (no native messaging)
+- [x] `host_permissions` for 127.0.0.1/localhost; options page to pair port+token + "Test connection"
+- [x] App-down → notify + let Chrome download normally (only cancels Chrome's dl after app accepts)
+- [x] Popup: 🟢/🔴 status + **live download list** with progress/speed/ETA + pause/resume/cancel/remove  *(#16)*
+- [x] Forwards cookies / Referer / User-Agent + suggested filename
+
+### Build/infra fixes
+- [x] Workspace detach for tauri build (#3), valid Windows .ico (#4), withGlobalTauri blank-window (#6), Linux WebKitGTK deps documented in README
 
 ---
 
-## ✅ Single-engine rewrite COMPLETE
-grab-host is gone. The Tauri app is the one engine, exposing a localhost HTTP
-API (token + CORS) that the Chrome extension calls. Tray + autostart keep it
-always-on. Engine + HTTP API fully tested in CI; GUI + extension round-trip
-need verification on a Windows desktop with Chrome.
+## 📋 Backlog / not started (pick up here in the new session)
+
+Ordered by suggested priority:
+
+1. [ ] **Firefox extension** — now trivial: same HTTP API, mostly a manifest
+       variant (`browser_specific_settings`), reuse background/popup/options.
+       Highest value-for-effort.
+2. [ ] **Podcast / RSS-feed downloading** — point Grab at a podcast RSS feed →
+       enqueue episode MP3s. (Legal audio; discussed as the Spotify alternative.)
+3. [ ] **yt-dlp / site-video downloading** — shell out to `yt-dlp` (+ `ffmpeg`)
+       for YouTube/SoundCloud/Bandcamp etc. Full design in TODO.md. Compliance:
+       legitimate content only; no DRM circumvention.
+4. [ ] Configurable API port in Settings (fixed at 17654 now).
+5. [ ] First-run "Start Grab on boot?" prompt (toggle exists in Settings).
+6. [ ] "Ask before downloading" review popup (auto-accept is default).
+7. [ ] Per-download speed limit (global done).
+8. [ ] HLS/DASH segment-level resume (regular files already byte-resume).
+9. [ ] Local-time scheduling (engine uses UTC now).
+10. [ ] Checksum verification, disk-space pre-check, clipboard monitor, proxy.
+11. [ ] Optional: WebSocket/SSE progress stream (replace the 1s polling).
+
+### Explicitly NOT doing
+- ❌ Spotify (or any DRM-protected service) track downloading — Widevine DRM +
+  copyright + ToS; circumvention is illegal. Offer legal audio sources instead
+  (Bandcamp/Free Music Archive/podcast RSS/yt-dlp for permitted content).
 
 ---
 
-## 📋 Backlog (from TODO.md, unchanged)
-- [ ] YouTube / site videos via yt-dlp (+ffmpeg)
-- [ ] Firefox extension (now trivial: just points at the same HTTP API)
-- [ ] Per-download speed limit (global done)
-- [ ] HLS/DASH segment-level resume
-- [ ] Local-time scheduling (currently UTC in engine)
-- [ ] Checksum verification, disk-space pre-check, clipboard monitor, proxy
-- [x] Live download list in the extension popup (polls GET /downloads every 1s;
-      progress/speed/ETA + pause/resume/cancel/remove) — *endpoints verified live*
-- [ ] Optional: WebSocket/SSE progress stream (replace the popup's 1s polling)
+## ⚠️ Notes for the next session
+- The engine's `pending_action` field/methods are retained but UNUSED in the
+  single-engine world (kept as potentially-useful; harmless, serde-default).
+- Scheduling time is UTC in the engine; the app could pass local time if precise
+  local schedules matter (item #9).
+- Some file-hosts use expiring/tokenized URLs — retry/resume covers genuine
+  mid-stream drops, but a truly dead URL can't be resumed by any downloader.
