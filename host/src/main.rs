@@ -127,6 +127,21 @@ async fn run() -> anyhow::Result<()> {
         tracing::info!("restored {} unfinished download(s)", restored.len());
     }
 
+    // Control-channel poller: the GUI (a separate process) writes pending
+    // control actions (pause/resume/cancel/remove) into the shared queue.json.
+    // The host OWNS the live downloads, so it polls and applies them here. Only
+    // the host does this — the app never applies actions, avoiding a race.
+    {
+        let manager = manager.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(500));
+            loop {
+                ticker.tick().await;
+                manager.apply_pending_actions().await;
+            }
+        });
+    }
+
     // Forward engine progress events to the extension over stdout.
     // stdout isn't Send-friendly to share, so we funnel everything through one
     // channel and do all writing from a single place.

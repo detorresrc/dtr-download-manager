@@ -100,6 +100,9 @@ function createItem(id, name) {
     await invoke("remove", { id });
     el.remove();
     downloads.delete(id);
+    // Suppress re-adding this row from the queue poll until the owning process
+    // (the host) actually removes it from the shared file.
+    recentlyRemoved.set(id, Date.now());
     if (downloads.size === 0) empty.style.display = "";
   };
   list.appendChild(el);
@@ -115,6 +118,7 @@ function createItem(id, name) {
 // "progress" listener; for those the event is fresher, so we don't overwrite a
 // just-updated item with a slightly stale file read.
 let lastEventAt = new Map(); // id -> timestamp of last live progress event
+const recentlyRemoved = new Map(); // id -> timestamp; suppresses re-adding after Remove
 
 async function refreshFromQueue() {
   let records;
@@ -126,6 +130,8 @@ async function refreshFromQueue() {
   const seen = new Set();
   for (const r of records) {
     seen.add(r.id);
+    // Don't resurrect a row the user just removed (host clears it shortly).
+    if (Date.now() - (recentlyRemoved.get(r.id) || 0) < 5000) continue;
     const name = r.target ? r.target.split(/[\\/]/).pop() : guessName(r.request.url);
     if (!downloads.has(r.id)) {
       createItem(r.id, name);

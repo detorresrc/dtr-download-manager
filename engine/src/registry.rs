@@ -87,6 +87,52 @@ impl Registry {
         }
     }
 
+    /// Request a control action on a download from another process (the GUI).
+    /// Written into the shared file; the owning process (the host) picks it up.
+    pub async fn request_action(&self, id: &str, action: crate::types::PendingAction) {
+        let mut inner = self.inner.lock().await;
+        if let Some(r) = inner.records.get_mut(id) {
+            r.pending_action = Some(action);
+            let _ = save(&inner.path, &inner.records).await;
+        }
+    }
+
+    /// Reload the file from disk (to observe actions written by another process),
+    /// then return and CLEAR any pending actions. The owning process calls this
+    /// periodically and applies each `(id, action)` to its live downloads.
+    pub async fn take_pending_actions(&self) -> Vec<(String, crate::types::PendingAction)> {
+        let mut inner = self.inner.lock().await;
+
+        // Merge actions written to disk by another process into our in-memory
+        // view. We only adopt the `pending_action` field from disk so we don't
+        // clobber our own fresher status/progress for downloads we own.
+        if let Some(on_disk) = load(&inner.path).await {
+            for (id, dr) in on_disk {
+                if let Some(action) = dr.pending_action {
+                    if let Some(r) = inner.records.get_mut(&id) {
+                        r.pending_action = Some(action);
+                    }
+                }
+            }
+        }
+
+        let pending: Vec<(String, crate::types::PendingAction)> = inner
+            .records
+            .iter()
+            .filter_map(|(id, r)| r.pending_action.map(|a| (id.clone(), a)))
+            .collect();
+
+        if !pending.is_empty() {
+            for (id, _) in &pending {
+                if let Some(r) = inner.records.get_mut(id) {
+                    r.pending_action = None;
+                }
+            }
+            let _ = save(&inner.path, &inner.records).await;
+        }
+        pending
+    }
+
     /// Record the resolved on-disk target path for a download.
     pub async fn set_target(&self, id: &str, target: PathBuf) {
         let mut inner = self.inner.lock().await;
@@ -353,6 +399,33 @@ mod tests {
         let reg = Registry::open(path.clone()).await;
         let all = reg.all().await;
         assert!(!all.is_empty(), "records should be recovered from backup");
+
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn pending_actions_roundtrip_across_registries() {
+        use crate::types::PendingAction;
+        let dir = std::env::temp_dir().join(format!("grab-reg-act-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("queue.json");
+
+        // Realistic sequence: the HOST creates the record first (via enqueue)...
+        let host = Registry::open(path.clone()).await;
+        host.upsert(DownloadRecord::new("dl-1".into(), req("https://a/1"))).await;
+
+        // ...then the APP (separate instance, same file) requests an action.
+        let app = Registry::open(path.clone()).await;
+        app.upsert(DownloadRecord::new("dl-1".into(), req("https://a/1"))).await;
+        app.request_action("dl-1", PendingAction::Pause).await;
+
+        // The host polls, picks up the action from disk, and clears it.
+        let actions = host.take_pending_actions().await;
+        assert_eq!(actions, vec![("dl-1".to_string(), PendingAction::Pause)]);
+
+        // Second take yields nothing (cleared).
+        let again = host.take_pending_actions().await;
+        assert!(again.is_empty());
 
         tokio::fs::remove_dir_all(&dir).await.ok();
     }

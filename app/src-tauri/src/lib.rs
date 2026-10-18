@@ -85,29 +85,49 @@ async fn read_queue_file(state: State<'_, Arc<AppState>>) -> Result<Vec<Download
     }
 }
 
+// Control commands apply to BOTH engines:
+//   1. the app's own manager  — handles downloads started in the app window;
+//   2. a pending action written to the shared queue file — the native host
+//      (which owns browser-started downloads) polls and applies it.
+// Whichever process owns the download acts on it; the other no-ops. This is why
+// the buttons now work for browser-driven downloads, which the app can't reach
+// directly (separate process, separate engine).
+use grab_engine::PendingAction;
+
 #[tauri::command]
 async fn remove(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     let manager = state.manager.lock().await;
+    // Cancel any app-owned transfer, then request Remove. We deliberately do
+    // NOT call forget() here: forget() rewrites the shared file WITHOUT the
+    // record, which would wipe the pending action before the host (the owner)
+    // sees it. The host's Remove handler cancels and forgets it from the file;
+    // the app's UI removes the row immediately for responsiveness.
     manager.cancel(&id).await;
-    manager.forget(&id).await;
+    manager.request_action(&id, PendingAction::Remove).await;
     Ok(())
 }
 
 #[tauri::command]
 async fn pause(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.manager.lock().await.pause(&id).await;
+    let manager = state.manager.lock().await;
+    manager.pause(&id).await;
+    manager.request_action(&id, PendingAction::Pause).await;
     Ok(())
 }
 
 #[tauri::command]
 async fn resume(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.manager.lock().await.resume(&id).await;
+    let manager = state.manager.lock().await;
+    manager.resume(&id).await;
+    manager.request_action(&id, PendingAction::Resume).await;
     Ok(())
 }
 
 #[tauri::command]
 async fn cancel(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.manager.lock().await.cancel(&id).await;
+    let manager = state.manager.lock().await;
+    manager.cancel(&id).await;
+    manager.request_action(&id, PendingAction::Cancel).await;
     Ok(())
 }
 
