@@ -69,7 +69,7 @@ pub async fn serve(manager: Manager, token: String, port: u16) -> std::io::Resul
     tracing::info!("grab HTTP API listening on http://{addr}");
     axum::serve(listener, router(manager, token))
         .await
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .map_err(std::io::Error::other)
 }
 
 // ---- auth helper ------------------------------------------------------------
