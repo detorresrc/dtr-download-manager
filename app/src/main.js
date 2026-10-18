@@ -169,8 +169,14 @@ function updateItem(p) {
     el.querySelector(".size").textContent = fmt(p.downloaded);
     if (p.status === "completed") barFill.style.width = "100%";
   }
-  el.querySelector(".speed").textContent =
-    p.status === "downloading" && p.speed ? `${fmt(p.speed)}/s` : "";
+  // Speed + ETA, shown only while actively downloading.
+  if (p.status === "downloading" && p.speed) {
+    const parts = [`${fmt(p.speed)}/s`];
+    if (p.eta_secs != null) parts.push(`${fmtEta(p.eta_secs)} left`);
+    el.querySelector(".speed").textContent = parts.join(" · ");
+  } else {
+    el.querySelector(".speed").textContent = "";
+  }
 
   if (p.status === "failed" && p.error) {
     el.querySelector(".size").textContent = "Error: " + p.error;
@@ -261,6 +267,19 @@ function fmt(n) {
   let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+// Human-readable "time remaining": 45s, 3m 20s, 1h 2m.
+function fmtEta(secs) {
+  if (secs == null) return "";
+  secs = Math.max(0, Math.round(secs));
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm ? `${h}h ${mm}m` : `${h}h`;
 }
 
 function guessName(url) {

@@ -127,6 +127,7 @@ pub async fn download_full(
             downloaded,
             total,
             speed,
+            eta_secs: Progress::estimate_eta(downloaded, total, speed),
             connections: conns,
             error: err,
         });
@@ -543,7 +544,12 @@ fn build_headers(req: &DownloadRequest) -> Result<HeaderMap> {
     Ok(map)
 }
 
-/// Emit a progress event ~once per second with a computed speed.
+/// Emit a progress event ~once per second with a smoothed speed and an ETA.
+///
+/// Raw per-second deltas are spiky (segments start/finish, buffers flush), which
+/// makes both the displayed speed and a naive ETA jump around. We smooth the
+/// speed with an exponential moving average, then derive the ETA from the
+/// smoothed speed so the "time remaining" is stable and useful.
 fn spawn_reporter(
     id: String,
     tx: mpsc::UnboundedSender<Progress>,
@@ -552,18 +558,34 @@ fn spawn_reporter(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last = downloaded.load(Ordering::SeqCst);
+        // EMA smoothing factor: 0.3 reacts reasonably fast but still steadies.
+        const ALPHA: f64 = 0.3;
+        let mut avg_speed: f64 = 0.0;
+        let mut seeded = false;
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
         loop {
             ticker.tick().await;
             let now = downloaded.load(Ordering::SeqCst);
-            let speed = now.saturating_sub(last);
+            let sample = now.saturating_sub(last) as f64; // bytes in the last ~1s
             last = now;
+
+            // Seed the average with the first real sample so early ETAs aren't wild.
+            if !seeded {
+                avg_speed = sample;
+                seeded = true;
+            } else {
+                avg_speed = ALPHA * sample + (1.0 - ALPHA) * avg_speed;
+            }
+            let speed = avg_speed.round() as u64;
+            let eta = Progress::estimate_eta(now, total, speed);
+
             let _ = tx.send(Progress {
                 id: id.clone(),
                 status: Status::Downloading,
                 downloaded: now,
                 total,
                 speed,
+                eta_secs: eta,
                 connections: 0,
                 error: None,
             });
