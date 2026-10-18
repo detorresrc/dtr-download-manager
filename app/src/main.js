@@ -222,6 +222,17 @@ document.getElementById("settings-btn").onclick = async () => {
   document.getElementById("s-speed").value = s.speed_limit ? Math.round(s.speed_limit / 1024) : 0;
   document.getElementById("s-categories").checked = s.use_categories !== false;
   document.getElementById("s-theme").value = s.theme || "system";
+
+  // Autostart state + API pairing info (independent of engine settings).
+  try {
+    document.getElementById("s-autostart").checked = await invoke("is_autostart_enabled");
+  } catch {}
+  try {
+    const api = await invoke("get_api_info");
+    document.getElementById("s-api-url").value = api.base_url;
+    document.getElementById("s-api-token").value = api.token;
+  } catch {}
+
   dialog.showModal();
 };
 
@@ -251,6 +262,10 @@ dialog.addEventListener("close", async () => {
   try {
     await invoke("save_settings", { settings });
     applyTheme(theme);
+    // Apply the autostart toggle (separate from engine settings).
+    await invoke("set_autostart", {
+      enabled: document.getElementById("s-autostart").checked,
+    });
   } catch (e) {
     alert("Failed to save settings: " + e);
   }

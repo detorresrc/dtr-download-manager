@@ -6,6 +6,12 @@
   "permissions": [
     "core:default",
     "core:event:default",
-    "dialog:default"
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "dialog:default",
+    "autostart:default"
   ]
 }

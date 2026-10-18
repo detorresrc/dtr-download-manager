@@ -12,7 +12,14 @@ struct AppState {
     manager: Mutex<Manager>,
     settings_path: PathBuf,
     queue_path: PathBuf,
+    /// Bearer token the extension must send; shown in Settings for pairing.
+    api_token: String,
+    /// Localhost port the HTTP API listens on.
+    api_port: u16,
 }
+
+/// The default localhost port for the extension-facing HTTP API.
+const DEFAULT_API_PORT: u16 = 17654;
 
 #[tauri::command]
 async fn start_download(
@@ -154,40 +161,101 @@ async fn save_settings(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single instance: a second launch focuses the already-running window
+        // instead of starting a second engine that would fight over the queue.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
+        // Autostart: launch at login (controlled via the set_autostart command).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostarted"]),
+        ))
         .setup(|app| {
-            // Resolve where settings + queue live (shared with the host format).
             let settings_path = config_dir().join("settings.json");
             let queue_path = config_dir().join("queue.json");
             let settings = load_settings(&settings_path);
+            let api_token = load_or_create_token();
+            let api_port = DEFAULT_API_PORT;
 
-            // Build a persistent manager for downloads started FROM the app.
-            //
-            // We deliberately do NOT call `restore()` here: the native host
-            // (launched by Chrome) is a separate process that owns the same
-            // `queue.json` and resumes unfinished downloads itself. If the app
-            // also restored them, two engines would race over the same files.
-            // The app instead polls `read_queue_file` to DISPLAY the host's
-            // downloads as a live dashboard.
+            // The app is now the SINGLE engine, so it resumes unfinished
+            // downloads itself (no separate host process anymore).
             let (manager, mut progress_rx) = tauri::async_runtime::block_on(async {
-                Manager::with_persistence(settings, queue_path.clone()).await
+                let (m, rx) = Manager::with_persistence(settings, queue_path.clone()).await;
+                let restored = m.restore().await;
+                if !restored.is_empty() {
+                    eprintln!("restored {} unfinished download(s)", restored.len());
+                }
+                (m, rx)
             });
+
+            // Clone the manager for the HTTP server BEFORE it's moved into the
+            // shared state (avoids a nested lock/block_on inside setup).
+            let http_manager = manager.clone();
 
             let state = Arc::new(AppState {
                 manager: Mutex::new(manager),
                 settings_path,
                 queue_path,
+                api_token: api_token.clone(),
+                api_port,
             });
             app.manage(state);
 
-            // Pump engine progress events to the webview.
+            // Start the localhost HTTP API the browser extension calls.
+            {
+                let token = api_token.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) =
+                        grab_engine::http_api::serve(http_manager, token, api_port).await
+                    {
+                        eprintln!("HTTP API failed to start on port {api_port}: {e}");
+                    }
+                });
+            }
+
+            // Pump engine progress events to the webview. Also raise the window
+            // the first time we see a given download id, so a download started
+            // from the browser surfaces the UI for the user to see/accept.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
                 while let Some(p) = progress_rx.recv().await {
+                    if seen.insert(p.id.clone()) {
+                        // First event for this download → surface the window.
+                        show_main(&handle);
+                    }
                     let _ = handle.emit("progress", ProgressEvent::from(&p));
                 }
             });
+
+            // System tray: quick actions + show/hide the window.
+            build_tray(app.handle())?;
+
+            // If launched at login (--autostarted), start hidden in the tray so
+            // it's not intrusive; otherwise show the window.
+            let autostarted = std::env::args().any(|a| a == "--autostarted");
+            if let Some(w) = app.get_webview_window("main") {
+                if autostarted {
+                    let _ = w.hide();
+                } else {
+                    let _ = w.show();
+                }
+            }
             Ok(())
+        })
+        // Close button hides to tray instead of quitting, so the engine + HTTP
+        // API keep running in the background to catch browser downloads.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             start_download,
@@ -202,10 +270,77 @@ pub fn run() {
             pause_all,
             start_all,
             pause_queue,
-            start_queue
+            start_queue,
+            get_api_info,
+            set_autostart,
+            is_autostart_enabled,
+            quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running Grab");
+}
+
+/// Build the system-tray icon and menu.
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder};
+    use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+
+    let open = MenuItemBuilder::with_id("open", "Open Grab").build(app)?;
+    let pause_all = MenuItemBuilder::with_id("pause_all", "Pause all").build(app)?;
+    let resume_all = MenuItemBuilder::with_id("resume_all", "Resume all").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&open, &pause_all, &resume_all])
+        .separator()
+        .item(&quit)
+        .build()?;
+
+    let _tray = TrayIconBuilder::with_id("main")
+        .tooltip("Grab Download Manager")
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        // Left-click shows the window (don't pop the menu on left click).
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show_main(app),
+            "quit" => app.exit(0),
+            "pause_all" => {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::spawn(async move {
+                        state.manager.lock().await.pause_all().await;
+                    });
+                }
+            }
+            "resume_all" => {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::spawn(async move {
+                        state.manager.lock().await.start_all().await;
+                    });
+                }
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Left-click the tray icon to show the window.
+            if let TrayIconEvent::Click { button, .. } = event {
+                if button == tauri::tray::MouseButton::Left {
+                    show_main(tray.app_handle());
+                }
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// Show, unminimize and focus the main window.
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
 }
 
 /// Serializable progress payload sent to the frontend.
@@ -260,4 +395,65 @@ fn load_settings(path: &PathBuf) -> Settings {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
         Err(_) => Settings::default(),
     }
+}
+
+/// Load the API token from `<config>/api_token`, generating + persisting a new
+/// random one the first time. The extension pairs with this token.
+fn load_or_create_token() -> String {
+    let path = config_dir().join("api_token");
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let t = existing.trim().to_string();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    // Generate a 32-char alphanumeric token.
+    use rand::Rng;
+    let token: String = rand::thread_rng()
+        .sample_iter(rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, &token);
+    token
+}
+
+/// Pairing info the Settings UI shows so the user can connect the extension.
+#[tauri::command]
+async fn get_api_info(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "port": state.api_port,
+        "token": state.api_token,
+        "base_url": format!("http://127.0.0.1:{}", state.api_port),
+    }))
+}
+
+/// Enable or disable launching Grab at login.
+#[tauri::command]
+async fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let mgr = app.autolaunch();
+    if enabled {
+        mgr.enable().map_err(|e| e.to_string())
+    } else {
+        mgr.disable().map_err(|e| e.to_string())
+    }
+}
+
+/// Whether autostart is currently enabled.
+#[tauri::command]
+async fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// Quit the whole app (used by the tray "Quit" item — the window close button
+/// only hides to tray so the engine keeps running).
+#[tauri::command]
+async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
 }
