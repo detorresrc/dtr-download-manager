@@ -131,4 +131,6 @@ need verification on a Windows desktop with Chrome.
 - [ ] HLS/DASH segment-level resume
 - [ ] Local-time scheduling (currently UTC in engine)
 - [ ] Checksum verification, disk-space pre-check, clipboard monitor, proxy
-- [ ] Optional: WebSocket/SSE progress stream for the extension popup
+- [x] Live download list in the extension popup (polls GET /downloads every 1s;
+      progress/speed/ETA + pause/resume/cancel/remove) — *endpoints verified live*
+- [ ] Optional: WebSocket/SSE progress stream (replace the popup's 1s polling)
