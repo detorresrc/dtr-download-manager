@@ -43,16 +43,16 @@ content the user has rights to, archival). Do NOT add DRM-circumvention features
 Downloading copyrighted YouTube content generally violates YouTube's ToS — make
 that clear in the UI/README.
 
-## 2. Firefox extension  — PLANNED
+## 2. Firefox extension  — PLANNED (now trivial)
 
-The engine + native host already support it; only a second extension manifest
-and the Firefox native-host registration path are needed.
+Since the extension talks to the app over plain HTTP (no native messaging), a
+Firefox port is mostly a manifest variant pointing at the same API.
 
-- [ ] `extension/manifest.firefox.json` (MV3 with `browser_specific_settings`).
-- [ ] `scripts/install-host-firefox-linux.sh` → `~/.mozilla/native-messaging-hosts/`.
-- [ ] Windows: register under `HKCU\Software\Mozilla\NativeMessagingHosts\…`.
-- [ ] Note Firefox's `allowed_extensions` (by extension ID) vs Chrome's
-      `allowed_origins` in the host manifest.
+- [ ] `extension/manifest.firefox.json` (MV3 + `browser_specific_settings`).
+- [ ] Confirm Firefox allows `fetch()` to `http://127.0.0.1` with the declared
+      `host_permissions` (same as Chrome).
+- [ ] Reuse the same `background.js`/`options.js`/`popup.js` unchanged.
+- [ ] No host registration needed — just pair the port + token in options.
 
 ## 3. Speed limiting (enforce `Settings.speed_limit`)  — ✅ DONE
 
