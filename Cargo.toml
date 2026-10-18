@@ -4,6 +4,10 @@ members = [
     "engine",
     "host",
 ]
+# The Tauri app (app/src-tauri) is its own workspace root; keep it out of this one.
+exclude = [
+    "app",
+]
 
 [workspace.package]
 version = "0.1.0"
