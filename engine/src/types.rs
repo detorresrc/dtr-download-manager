@@ -54,6 +54,9 @@ pub struct DownloadRequest {
     /// handling) itself.
     #[serde(default)]
     pub resolved_target: Option<PathBuf>,
+    /// Which queue this download belongs to. Defaults to the main queue.
+    #[serde(default)]
+    pub queue: Option<String>,
 }
 
 impl DownloadRequest {
@@ -61,12 +64,80 @@ impl DownloadRequest {
     pub fn effective_kind(&self) -> DownloadKind {
         self.kind.unwrap_or_else(|| DownloadKind::guess_from_url(&self.url))
     }
+    /// The queue id this download targets, defaulting to the main queue.
+    pub fn queue_id(&self) -> String {
+        self.queue.clone().unwrap_or_else(|| DEFAULT_QUEUE_ID.to_string())
+    }
+}
+
+/// UI theme preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// Follow the operating system's light/dark setting.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// A named download queue with its own concurrency limit and optional schedule.
+/// Downloads are assigned to a queue; the scheduler starts them subject to the
+/// queue's `max_concurrent`, its `running` flag, and its `schedule` window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Queue {
+    /// Stable identifier used by downloads to reference this queue.
+    pub id: String,
+    /// Human-readable name shown in the UI.
+    pub name: String,
+    /// Max downloads from THIS queue that may transfer at once.
+    pub max_concurrent: usize,
+    /// When false, the queue is manually paused and starts nothing.
+    #[serde(default = "default_true")]
+    pub running: bool,
+    /// Optional time-window schedule gating automatic starts.
+    #[serde(default)]
+    pub schedule: crate::schedule::Schedule,
+}
+
+impl Queue {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, max_concurrent: usize) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            max_concurrent: max_concurrent.max(1),
+            running: true,
+            schedule: crate::schedule::Schedule::default(),
+        }
+    }
+}
+
+/// The id of the built-in default queue that always exists.
+pub const DEFAULT_QUEUE_ID: &str = "main";
+
+/// A download category: files whose extension matches `extensions` are saved
+/// into `<download_dir>/<subfolder>` automatically (IDM-style auto-foldering).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Category {
+    /// Display name, e.g. "Video".
+    pub name: String,
+    /// Subfolder under the base download dir, e.g. "Video". Empty = base dir.
+    pub subfolder: String,
+    /// Lowercase extensions WITHOUT the dot, e.g. ["mp4", "mkv"].
+    pub extensions: Vec<String>,
+}
+
+impl Category {
+    fn matches_ext(&self, ext: &str) -> bool {
+        let ext = ext.trim_start_matches('.').to_ascii_lowercase();
+        self.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext))
+    }
 }
 
 /// Engine-wide, user-configurable settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    /// Where files are saved by default.
+    /// Where files are saved by default (the base dir; categories nest under it).
     pub download_dir: PathBuf,
     /// Max number of connections used to split a single file (segments).
     pub max_connections_per_file: usize,
@@ -77,6 +148,18 @@ pub struct Settings {
     pub speed_limit: Option<u64>,
     /// Minimum file size (bytes) before we bother splitting into segments.
     pub min_split_size: u64,
+    /// Auto-foldering rules by file extension. First match wins.
+    #[serde(default = "default_categories")]
+    pub categories: Vec<Category>,
+    /// When true, files are sorted into category subfolders automatically.
+    #[serde(default = "default_true")]
+    pub use_categories: bool,
+    /// UI theme preference (consumed by the app; stored here for one source of truth).
+    #[serde(default)]
+    pub theme: Theme,
+    /// Configured download queues. Always contains at least the main queue.
+    #[serde(default = "default_queues")]
+    pub queues: Vec<Queue>,
 }
 
 impl Default for Settings {
@@ -88,8 +171,86 @@ impl Default for Settings {
             speed_limit: None,
             // Don't split files smaller than 1 MiB; overhead isn't worth it.
             min_split_size: 1024 * 1024,
+            categories: default_categories(),
+            use_categories: true,
+            theme: Theme::System,
+            queues: default_queues(),
         }
     }
+}
+
+/// The default set of queues: a single "main" queue using the global concurrency.
+fn default_queues() -> Vec<Queue> {
+    vec![Queue::new(DEFAULT_QUEUE_ID, "Main", 4)]
+}
+
+impl Settings {
+    /// Resolve the directory a file with `filename` should be saved into,
+    /// honoring category rules. Returns the base dir when categories are off or
+    /// nothing matches. Does NOT create the directory.
+    pub fn category_dir_for(&self, filename: &str) -> PathBuf {
+        if !self.use_categories {
+            return self.download_dir.clone();
+        }
+        let ext = filename.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+        if ext.is_empty() {
+            return self.download_dir.clone();
+        }
+        for cat in &self.categories {
+            if cat.matches_ext(ext) && !cat.subfolder.is_empty() {
+                return self.download_dir.join(&cat.subfolder);
+            }
+        }
+        self.download_dir.clone()
+    }
+
+    /// Clamp the connection count to a sane range.
+    pub fn effective_connections(&self) -> usize {
+        self.max_connections_per_file.clamp(1, 32)
+    }
+
+    /// Look up a queue by id, falling back to the main queue, then to a
+    /// synthesized default if even that is missing.
+    pub fn queue(&self, id: &str) -> Queue {
+        self.queues
+            .iter()
+            .find(|q| q.id == id)
+            .or_else(|| self.queues.iter().find(|q| q.id == DEFAULT_QUEUE_ID))
+            .cloned()
+            .unwrap_or_else(|| Queue::new(DEFAULT_QUEUE_ID, "Main", self.max_concurrent_downloads))
+    }
+
+    /// Ensure the invariant that a main queue always exists; call after loading
+    /// or editing settings.
+    pub fn ensure_main_queue(&mut self) {
+        if !self.queues.iter().any(|q| q.id == DEFAULT_QUEUE_ID) {
+            self.queues.insert(
+                0,
+                Queue::new(DEFAULT_QUEUE_ID, "Main", self.max_concurrent_downloads),
+            );
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// The default IDM-style category set.
+fn default_categories() -> Vec<Category> {
+    let mk = |name: &str, sub: &str, exts: &[&str]| Category {
+        name: name.to_string(),
+        subfolder: sub.to_string(),
+        extensions: exts.iter().map(|s| s.to_string()).collect(),
+    };
+    vec![
+        mk("Video", "Video", &["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "mpg", "mpeg"]),
+        mk("Audio", "Audio", &["mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus"]),
+        mk("Documents", "Documents", &["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "odt", "epub"]),
+        mk("Programs", "Programs", &["exe", "msi", "dmg", "pkg", "deb", "rpm", "appimage", "apk"]),
+        mk("Archives", "Archives", &["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso"]),
+        mk("Images", "Images", &["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff"]),
+    ]
 }
 
 fn default_download_dir() -> PathBuf {
@@ -209,4 +370,81 @@ pub struct Progress {
     pub connections: usize,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings_with_base(base: &str) -> Settings {
+        Settings {
+            download_dir: PathBuf::from(base),
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn category_routes_video_to_subfolder() {
+        let s = settings_with_base("/dl");
+        assert_eq!(s.category_dir_for("movie.mp4"), PathBuf::from("/dl/Video"));
+        assert_eq!(s.category_dir_for("song.mp3"), PathBuf::from("/dl/Audio"));
+        assert_eq!(s.category_dir_for("report.pdf"), PathBuf::from("/dl/Documents"));
+        assert_eq!(s.category_dir_for("app.exe"), PathBuf::from("/dl/Programs"));
+        assert_eq!(s.category_dir_for("pack.zip"), PathBuf::from("/dl/Archives"));
+    }
+
+    #[test]
+    fn category_is_case_insensitive() {
+        let s = settings_with_base("/dl");
+        assert_eq!(s.category_dir_for("CLIP.MKV"), PathBuf::from("/dl/Video"));
+    }
+
+    #[test]
+    fn unknown_extension_stays_in_base() {
+        let s = settings_with_base("/dl");
+        assert_eq!(s.category_dir_for("data.xyz"), PathBuf::from("/dl"));
+        assert_eq!(s.category_dir_for("noext"), PathBuf::from("/dl"));
+    }
+
+    #[test]
+    fn categories_disabled_uses_base() {
+        let mut s = settings_with_base("/dl");
+        s.use_categories = false;
+        assert_eq!(s.category_dir_for("movie.mp4"), PathBuf::from("/dl"));
+    }
+
+    #[test]
+    fn connections_are_clamped() {
+        let mut s = Settings::default();
+        s.max_connections_per_file = 999;
+        assert_eq!(s.effective_connections(), 32);
+        s.max_connections_per_file = 0;
+        assert_eq!(s.effective_connections(), 1);
+    }
+
+    #[test]
+    fn settings_roundtrip_json_with_new_fields() {
+        let s = Settings::default();
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.categories.len(), s.categories.len());
+        assert!(back.use_categories);
+        assert_eq!(back.theme, Theme::System);
+    }
+
+    #[test]
+    fn old_settings_json_without_new_fields_still_loads() {
+        // A settings.json written by an earlier version (no categories/theme).
+        let old = r#"{
+            "download_dir": "/dl",
+            "max_connections_per_file": 8,
+            "max_concurrent_downloads": 4,
+            "min_split_size": 1048576
+        }"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        // Defaults fill in for the missing fields.
+        assert!(s.use_categories);
+        assert!(!s.categories.is_empty());
+        assert_eq!(s.theme, Theme::System);
+    }
 }

@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
         max_concurrent_downloads: 1,
         speed_limit: None,
         min_split_size: 1,
+        ..Settings::default()
     };
 
     let (manager, mut rx) = Manager::new(settings);
@@ -30,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         save_dir: None,
         kind: Some(DownloadKind::Hls),
             resolved_target: None,
+            queue: None,
     };
     let id = manager.enqueue(req).await;
     println!("enqueued {id}");

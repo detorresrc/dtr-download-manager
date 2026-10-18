@@ -8,7 +8,9 @@ pub mod manager;
 pub mod media;
 pub mod media_download;
 pub mod probe;
+pub mod ratelimit;
 pub mod registry;
+pub mod schedule;
 pub mod segment;
 pub mod state;
 pub mod types;
@@ -16,9 +18,12 @@ pub mod types;
 pub use download::{download, Handle};
 pub use manager::Manager;
 pub use probe::probe;
+pub use ratelimit::RateLimiter;
 pub use registry::Registry;
+pub use schedule::Schedule;
 pub use segment::{plan, Segment};
 pub use state::DownloadState;
 pub use types::{
-    DownloadKind, DownloadRecord, DownloadRequest, Progress, ProbeResult, Settings, Status,
+    Category, DownloadKind, DownloadRecord, DownloadRequest, Progress, ProbeResult, Queue,
+    Settings, Status, Theme, DEFAULT_QUEUE_ID,
 };

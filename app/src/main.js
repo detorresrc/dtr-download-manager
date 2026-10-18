@@ -21,13 +21,35 @@ async function addDownload() {
     return;
   }
   const kind = document.getElementById("kind-select").value || null;
+  const queue = document.getElementById("queue-select").value || null;
   try {
-    const id = await invoke("start_download", { url, kind });
+    const id = await invoke("start_download", { url, kind, queue });
     const name = guessName(url);
     createItem(id, name);
     urlInput.value = "";
   } catch (e) {
     alert("Failed to start download: " + e);
+  }
+}
+
+// Global queue controls.
+document.getElementById("pause-all-btn").onclick = () => invoke("pause_all");
+document.getElementById("start-all-btn").onclick = () => invoke("start_all");
+
+// Populate the queue picker from settings.
+async function loadQueues() {
+  try {
+    const s = await invoke("get_settings");
+    const sel = document.getElementById("queue-select");
+    sel.innerHTML = "";
+    for (const q of s.queues || [{ id: "main", name: "Main" }]) {
+      const opt = document.createElement("option");
+      opt.value = q.id;
+      opt.textContent = q.name + (q.running === false ? " (paused)" : "");
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    console.warn("Could not load queues:", e);
   }
 }
 
@@ -125,8 +147,13 @@ function updateItem(p) {
 
 listen("progress", (event) => updateItem(event.payload));
 
-// Load any downloads persisted from a previous session.
+// Load any downloads persisted from a previous session, apply the theme, and
+// populate the queue picker.
 restoreList();
+loadQueues();
+invoke("get_settings")
+  .then((s) => applyTheme(s.theme || "system"))
+  .catch(() => {});
 
 // ---- Settings ---------------------------------------------------------------
 
@@ -136,6 +163,10 @@ document.getElementById("settings-btn").onclick = async () => {
   document.getElementById("s-dir").value = s.download_dir;
   document.getElementById("s-conns").value = s.max_connections_per_file;
   document.getElementById("s-concurrent").value = s.max_concurrent_downloads;
+  // speed_limit is bytes/sec in the engine; show it as KB/s (0 = unlimited).
+  document.getElementById("s-speed").value = s.speed_limit ? Math.round(s.speed_limit / 1024) : 0;
+  document.getElementById("s-categories").checked = s.use_categories !== false;
+  document.getElementById("s-theme").value = s.theme || "system";
   dialog.showModal();
 };
 
@@ -147,18 +178,41 @@ document.getElementById("s-browse").onclick = async () => {
 dialog.addEventListener("close", async () => {
   if (dialog.returnValue !== "save") return;
   const current = await invoke("get_settings");
+  const speedKb = parseInt(document.getElementById("s-speed").value, 10) || 0;
+  const theme = document.getElementById("s-theme").value;
   const settings = {
     ...current,
     download_dir: document.getElementById("s-dir").value,
-    max_connections_per_file: parseInt(document.getElementById("s-conns").value, 10) || 8,
+    max_connections_per_file: Math.min(
+      32,
+      Math.max(1, parseInt(document.getElementById("s-conns").value, 10) || 8)
+    ),
     max_concurrent_downloads: parseInt(document.getElementById("s-concurrent").value, 10) || 4,
+    // Convert KB/s back to bytes/sec; 0 means unlimited (null).
+    speed_limit: speedKb > 0 ? speedKb * 1024 : null,
+    use_categories: document.getElementById("s-categories").checked,
+    theme,
   };
   try {
     await invoke("save_settings", { settings });
+    applyTheme(theme);
   } catch (e) {
     alert("Failed to save settings: " + e);
   }
 });
+
+// Apply the chosen theme by forcing a color-scheme on the root element.
+// "system" clears the override so the OS preference (via CSS) takes over.
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === "light" || theme === "dark") {
+    root.style.colorScheme = theme;
+    root.dataset.theme = theme;
+  } else {
+    root.style.colorScheme = "";
+    delete root.dataset.theme;
+  }
+}
 
 // ---- Helpers ----------------------------------------------------------------
 

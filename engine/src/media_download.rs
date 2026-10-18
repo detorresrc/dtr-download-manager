@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Semaphore};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn download_media(
     client: Client,
     id: String,
@@ -28,6 +29,7 @@ pub async fn download_media(
     handle: Handle,
     tx: mpsc::UnboundedSender<Progress>,
     target_sink: Option<crate::download::TargetSink>,
+    limiter: std::sync::Arc<crate::ratelimit::RateLimiter>,
 ) -> Result<PathBuf> {
     let emit = |status: Status, done: u64, total: Option<u64>, speed: u64, conns: usize, err: Option<String>| {
         let _ = tx.send(Progress {
@@ -62,14 +64,14 @@ pub async fn download_media(
         }
         t
     } else {
-        let dir = req
-            .save_dir
-            .clone()
-            .unwrap_or_else(|| settings.download_dir.clone());
+        let filename = media_filename(&req, &final_url, plan.suggested_ext);
+        let dir = match &req.save_dir {
+            Some(d) => d.clone(),
+            None => settings.category_dir_for(&filename),
+        };
         tokio::fs::create_dir_all(&dir)
             .await
             .with_context(|| format!("creating download dir {}", dir.display()))?;
-        let filename = media_filename(&req, &final_url, plan.suggested_ext);
         unique_path(&dir, &filename).await
     };
     if let Some(sink) = &target_sink {
@@ -101,12 +103,16 @@ pub async fn download_media(
         let sem = sem.clone();
         let url = url.to_string();
         let handle = handle.clone();
+        let limiter = limiter.clone();
         ordered.push_back(async move {
             let _permit = sem.acquire().await.expect("semaphore open");
             if handle.is_canceled() {
                 anyhow::bail!("canceled");
             }
-            fetch_bytes(&client, &headers, &url).await
+            let data = fetch_bytes(&client, &headers, &url).await?;
+            // Throttle to the shared global bandwidth cap (no-op if unlimited).
+            limiter.acquire(data.len() as u64).await;
+            Ok(data)
         });
     }
 
@@ -298,24 +304,7 @@ fn ensure_ext(name: &str, ext: &str) -> String {
     }
 }
 
+/// Reuse the engine's atomic, race-safe path reservation.
 async fn unique_path(dir: &std::path::Path, filename: &str) -> PathBuf {
-    let candidate = dir.join(filename);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let (stem, ext) = match filename.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s.to_string(), Some(e.to_string())),
-        _ => (filename.to_string(), None),
-    };
-    for i in 1..10_000 {
-        let name = match &ext {
-            Some(e) => format!("{stem} ({i}).{e}"),
-            None => format!("{stem} ({i})"),
-        };
-        let candidate = dir.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    dir.join(filename)
+    crate::download::unique_path(dir, filename).await
 }

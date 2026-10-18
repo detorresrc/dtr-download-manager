@@ -17,6 +17,21 @@
     --muted: #8a8f98;
   }
 }
+/* Explicit theme overrides (set via the Theme setting), independent of the OS. */
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --border: #e2e4e8;
+  --text: #1a1c1f;
+  --muted: #8a8f98;
+}
+:root[data-theme="dark"] {
+  --bg: #15171a;
+  --card: #1e2125;
+  --border: #2c3036;
+  --text: #e7e9ec;
+  --muted: #8a8f98;
+}
 
 * { box-sizing: border-box; }
 body {

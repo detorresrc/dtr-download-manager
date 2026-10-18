@@ -20,6 +20,7 @@ async fn start_download(
     filename: Option<String>,
     save_dir: Option<String>,
     kind: Option<String>,
+    queue: Option<String>,
 ) -> Result<String, String> {
     let kind = kind.and_then(|k| match k.to_ascii_lowercase().as_str() {
         "hls" => Some(DownloadKind::Hls),
@@ -34,9 +35,34 @@ async fn start_download(
         save_dir: save_dir.map(PathBuf::from),
         kind,
         resolved_target: None,
+        queue,
     };
     let manager = state.manager.lock().await;
     Ok(manager.enqueue(req).await)
+}
+
+#[tauri::command]
+async fn pause_all(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.manager.lock().await.pause_all().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_all(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.manager.lock().await.start_all().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn pause_queue(state: State<'_, Arc<AppState>>, queue: String) -> Result<(), String> {
+    state.manager.lock().await.pause_queue(&queue).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_queue(state: State<'_, Arc<AppState>>, queue: String) -> Result<(), String> {
+    state.manager.lock().await.start_queue(&queue).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -133,7 +159,11 @@ pub fn run() {
             get_settings,
             save_settings,
             list_downloads,
-            remove
+            remove,
+            pause_all,
+            start_all,
+            pause_queue,
+            start_queue
         ])
         .run(tauri::generate_context!())
         .expect("error while running Grab");
