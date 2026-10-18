@@ -395,7 +395,7 @@ async fn run_segmented(
 async fn fetch_segment(
     client: Client,
     url: String,
-    mut headers: HeaderMap,
+    base_headers: HeaderMap,
     idx: usize,
     seg: Segment,
     file: Arc<tokio::sync::Mutex<File>>,
@@ -404,34 +404,15 @@ async fn fetch_segment(
     handle: Handle,
     limiter: Arc<RateLimiter>,
 ) -> Result<()> {
-    headers.insert(
-        RANGE,
-        HeaderValue::from_str(&seg.range_header()).expect("valid range header"),
-    );
-    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
-    let resp = client
-        .get(&url)
-        .headers(headers)
-        .send()
-        .await
-        .with_context(|| format!("segment {idx} request failed"))?
-        .error_for_status()
-        .with_context(|| format!("segment {idx} bad status"))?;
-
-    // CRITICAL: a server may ignore our Range header and reply 200 with the
-    // FULL body. If we streamed that into a segment's offset we'd corrupt the
-    // file (overlapping writes, wrong size). Only 206 Partial Content is safe
-    // for segmented writes; anything else aborts so the caller can fall back to
-    // a single stream.
-    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        return Err(SegmentError::RangeIgnored.into());
-    }
-
-    let mut resp = resp;
+    // Flaky hosts drop the connection mid-segment ("reading chunk"). Retry and
+    // RESUME from wherever we got to: re-request `Range: bytes={offset}-{end}`.
+    // `offset` persists across attempts so each retry picks up exactly where the
+    // previous one died — no re-downloading and no gaps.
+    const MAX_ATTEMPTS: usize = 10;
+    let limit = seg.end; // never write past this segment's last byte
     let mut offset = seg.write_offset();
-    // Never write past this segment's boundary, even if the server over-sends.
-    let limit = seg.end;
-    while let Some(chunk) = resp.chunk().await.context("reading chunk")? {
+
+    for attempt in 0..MAX_ATTEMPTS {
         if handle.is_canceled() {
             anyhow::bail!("canceled");
         }
@@ -439,33 +420,96 @@ async fn fetch_segment(
             anyhow::bail!("paused");
         }
         if offset > limit {
-            break;
+            return Ok(()); // already complete
         }
-        // Clamp the chunk so it cannot spill into the next segment's bytes.
-        let remaining = limit - offset + 1;
-        let take = (chunk.len() as u64).min(remaining) as usize;
-        let slice = &chunk[..take];
-        // Throttle to the shared global bandwidth cap (no-op when unlimited).
-        limiter.acquire(take as u64).await;
-        {
-            let mut f = file.lock().await;
-            f.seek(SeekFrom::Start(offset)).await?;
-            f.write_all(slice).await?;
+
+        let mut headers = base_headers.clone();
+        headers.insert(
+            RANGE,
+            HeaderValue::from_str(&format!("bytes={offset}-{limit}")).expect("valid range"),
+        );
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+
+        let send = client.get(&url).headers(headers).send().await;
+        let resp = match send.and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                if attempt + 1 < MAX_ATTEMPTS {
+                    tracing::warn!("segment {idx} request failed (attempt {}), retrying: {e}", attempt + 1);
+                    backoff(attempt).await;
+                    continue;
+                }
+                return Err(anyhow::Error::new(e).context(format!("segment {idx} request failed")));
+            }
+        };
+
+        // A server may ignore Range and reply 200 with the FULL body — unsafe to
+        // write at a segment offset. Only 206 is valid for segmented writes;
+        // bail so the orchestrator falls back to a single stream. (Only treat
+        // the FIRST attempt's 200 as a range-ignored signal; mid-download we've
+        // already proven ranges work, so a non-206 there is just a bad retry.)
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            if offset == seg.write_offset() {
+                return Err(SegmentError::RangeIgnored.into());
+            }
+            if attempt + 1 < MAX_ATTEMPTS {
+                backoff(attempt).await;
+                continue;
+            }
+            anyhow::bail!("segment {idx}: server stopped honoring Range mid-download");
         }
-        let n = take as u64;
-        offset += n;
-        downloaded.fetch_add(n, Ordering::SeqCst);
-        progress.lock().await.add(idx, n);
-    }
-    // The stream ended. If we didn't reach the end of the segment, the server
-    // closed the connection early (short read). Treating this as success would
-    // leave an unwritten gap in the file, so fail loudly — the download will be
-    // marked failed and can be resumed (the bytes we did write are checkpointed).
-    if offset <= limit {
+
+        let mut resp = resp;
+        let mut dropped = false;
+        loop {
+            if handle.is_canceled() {
+                anyhow::bail!("canceled");
+            }
+            if handle.is_paused() {
+                anyhow::bail!("paused");
+            }
+            if offset > limit {
+                break;
+            }
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    let remaining = limit - offset + 1;
+                    let take = (chunk.len() as u64).min(remaining) as usize;
+                    limiter.acquire(take as u64).await;
+                    {
+                        let mut f = file.lock().await;
+                        f.seek(SeekFrom::Start(offset)).await?;
+                        f.write_all(&chunk[..take]).await?;
+                    }
+                    let n = take as u64;
+                    offset += n;
+                    downloaded.fetch_add(n, Ordering::SeqCst);
+                    progress.lock().await.add(idx, n);
+                }
+                Ok(None) => break,          // stream ended for this attempt
+                Err(_) => {
+                    dropped = true;
+                    break;                   // connection dropped → retry from offset
+                }
+            }
+        }
+
+        if offset > limit {
+            return Ok(()); // segment fully downloaded
+        }
+        // Not done: either a clean-but-short end or a dropped connection. Retry
+        // from the current offset (resume) unless we're out of attempts.
+        if attempt + 1 < MAX_ATTEMPTS {
+            tracing::warn!(
+                "segment {idx} {} at {offset}/{limit} (attempt {}), resuming…",
+                if dropped { "connection dropped" } else { "ended early" },
+                attempt + 1
+            );
+            backoff(attempt).await;
+            continue;
+        }
         anyhow::bail!(
-            "segment {idx} ended early at offset {offset}, expected through {limit} \
-             (server closed connection; {} bytes short)",
-            limit - offset + 1
+            "segment {idx} incomplete after {MAX_ATTEMPTS} attempts: reached {offset}, needed {limit}"
         );
     }
     Ok(())
