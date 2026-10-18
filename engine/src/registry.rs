@@ -53,24 +53,36 @@ impl Registry {
         let _ = save(&inner.path, &inner.records).await;
     }
 
-    /// Update the mutable progress/status fields of a record, then persist.
-    /// No-ops if the id is unknown.
-    pub async fn update(
-        &self,
-        id: &str,
-        status: Status,
-        downloaded: u64,
-        total: Option<u64>,
-        error: Option<String>,
-    ) {
+    /// Update the mutable progress/status fields of a record from a live
+    /// `Progress` event, then persist. No-ops if the id is unknown.
+    ///
+    /// Persisting `speed`/`eta_secs` here is what lets the GUI display live
+    /// stats for downloads run by a DIFFERENT process (the browser's native
+    /// host): the app reads this file and sees the latest speed/ETA.
+    pub async fn update(&self, p: &crate::types::Progress) {
+        let mut inner = self.inner.lock().await;
+        if let Some(r) = inner.records.get_mut(&p.id) {
+            r.status = p.status;
+            r.downloaded = p.downloaded;
+            if p.total.is_some() {
+                r.total = p.total;
+            }
+            r.speed = p.speed;
+            r.eta_secs = p.eta_secs;
+            r.error = p.error.clone();
+            let _ = save(&inner.path, &inner.records).await;
+        }
+    }
+
+    /// Set just the status of a record (and clear transient speed/ETA, since a
+    /// non-downloading state isn't moving), then persist. Used for queue/pause
+    /// transitions. No-ops if the id is unknown.
+    pub async fn set_status(&self, id: &str, status: Status) {
         let mut inner = self.inner.lock().await;
         if let Some(r) = inner.records.get_mut(id) {
             r.status = status;
-            r.downloaded = downloaded;
-            if total.is_some() {
-                r.total = total;
-            }
-            r.error = error;
+            r.speed = 0;
+            r.eta_secs = None;
             let _ = save(&inner.path, &inner.records).await;
         }
     }
@@ -280,7 +292,17 @@ mod tests {
             let reg = Registry::open(path.clone()).await;
             reg.upsert(DownloadRecord::new("dl-1".into(), req("https://a/1"))).await;
             reg.upsert(DownloadRecord::new("dl-2".into(), req("https://a/2"))).await;
-            reg.update("dl-1", Status::Completed, 100, Some(100), None).await;
+            reg.update(&crate::types::Progress {
+                id: "dl-1".into(),
+                status: Status::Completed,
+                downloaded: 100,
+                total: Some(100),
+                speed: 0,
+                eta_secs: None,
+                connections: 0,
+                error: None,
+            })
+            .await;
         }
 
         // Reopen: records should survive.
