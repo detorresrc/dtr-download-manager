@@ -70,8 +70,14 @@ enum Incoming {
         max_connections_per_file: Option<usize>,
         #[serde(default)]
         max_concurrent_downloads: Option<usize>,
+        /// Double-Option so we can tell "omitted" (None → leave unchanged) from
+        /// "null" (Some(None) → set to unlimited) from a value (Some(Some(n))).
         #[serde(default)]
-        speed_limit: Option<u64>,
+        speed_limit: Option<Option<u64>>,
+        #[serde(default)]
+        use_categories: Option<bool>,
+        #[serde(default)]
+        theme: Option<String>,
     },
     Ping,
 }
@@ -217,18 +223,34 @@ async fn handle_message(
             max_connections_per_file,
             max_concurrent_downloads,
             speed_limit,
+            use_categories,
+            theme,
         } => {
+            // Patch only the fields that were provided; categories list and any
+            // unspecified field are preserved from the current settings.
             let mut s = manager.settings().await;
             if let Some(d) = download_dir {
                 s.download_dir = d;
             }
             if let Some(n) = max_connections_per_file {
-                s.max_connections_per_file = n.max(1);
+                s.max_connections_per_file = n.clamp(1, 32);
             }
             if let Some(n) = max_concurrent_downloads {
                 s.max_concurrent_downloads = n.max(1);
             }
-            s.speed_limit = speed_limit;
+            if let Some(limit) = speed_limit {
+                s.speed_limit = limit; // Some(None) => unlimited, Some(Some(n)) => n
+            }
+            if let Some(uc) = use_categories {
+                s.use_categories = uc;
+            }
+            if let Some(t) = theme {
+                s.theme = match t.to_ascii_lowercase().as_str() {
+                    "light" => grab_engine::Theme::Light,
+                    "dark" => grab_engine::Theme::Dark,
+                    _ => grab_engine::Theme::System,
+                };
+            }
             persist_settings(&s);
             manager.update_settings(s).await;
             let _ = out.send(serde_json::json!({ "type": "settings_saved" }));

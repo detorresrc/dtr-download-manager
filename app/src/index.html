@@ -36,10 +36,22 @@
           <input id="s-dir" type="text" />
           <button id="s-browse" type="button" class="ghost">Browse…</button>
         </div>
-        <label>Max connections per file</label>
+        <label>Max connections per file (1–32)</label>
         <input id="s-conns" type="number" min="1" max="32" />
         <label>Max concurrent downloads</label>
         <input id="s-concurrent" type="number" min="1" max="20" />
+        <label>Speed limit (KB/s, 0 = unlimited)</label>
+        <input id="s-speed" type="number" min="0" step="64" />
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+          <input id="s-categories" type="checkbox" style="width:auto;" />
+          Sort downloads into category folders (Video, Audio, …)
+        </label>
+        <label>Theme</label>
+        <select id="s-theme" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
         <div class="row end">
           <button value="cancel" class="ghost">Cancel</button>
           <button id="s-save" value="save">Save</button>

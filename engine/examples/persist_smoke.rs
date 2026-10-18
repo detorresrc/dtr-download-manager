@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         max_concurrent_downloads: 2,
         speed_limit: None,
         min_split_size: 64 * 1024,
+        ..Settings::default()
     };
 
     // --- Manager A runs in its OWN runtime on a separate thread, which we

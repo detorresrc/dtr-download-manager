@@ -3,6 +3,7 @@
 //! pause/resume/cancel per id.
 
 use crate::download::Handle;
+use crate::ratelimit::RateLimiter;
 use crate::registry::Registry;
 use crate::types::{DownloadRecord, DownloadRequest, Progress, Settings};
 use reqwest::Client;
@@ -28,6 +29,8 @@ struct Inner {
     progress_tx: mpsc::UnboundedSender<Progress>,
     /// …and is mirrored into the persistent queue here.
     registry: Registry,
+    /// Shared global bandwidth cap applied across every active download.
+    limiter: Arc<RateLimiter>,
 }
 
 impl Manager {
@@ -70,6 +73,7 @@ impl Manager {
             .expect("failed to build HTTP client");
 
         let permits = Semaphore::new(settings.max_concurrent_downloads.max(1));
+        let limiter = Arc::new(RateLimiter::new(settings.speed_limit));
         let inner = Arc::new(Inner {
             client,
             settings: Mutex::new(settings),
@@ -78,6 +82,7 @@ impl Manager {
             next_id: AtomicU64::new(1),
             progress_tx: internal_tx,
             registry,
+            limiter,
         });
 
         // Relay: persist-then-forward. Keeps the queue file in sync with the
@@ -156,7 +161,7 @@ impl Manager {
                         registry.set_target(&sink_id, path).await;
                     });
                 });
-            let _ = crate::download::download_with_target_sink(
+            let _ = crate::download::download_full(
                 inner.client.clone(),
                 id.clone(),
                 req,
@@ -164,6 +169,7 @@ impl Manager {
                 handle,
                 inner.progress_tx.clone(),
                 Some(target_sink),
+                inner.limiter.clone(),
             )
             .await;
             inner.handles.lock().await.remove(&id);
@@ -220,6 +226,8 @@ impl Manager {
     }
 
     pub async fn update_settings(&self, settings: Settings) {
+        // Apply the new speed limit to the live shared limiter immediately.
+        self.inner.limiter.set_rate(settings.speed_limit);
         *self.inner.settings.lock().await = settings;
     }
 

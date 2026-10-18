@@ -28,8 +28,10 @@ fallback to a single connection when the server doesn't support ranges.
 - **Multi-connection downloads** — splits a file into N parallel segments.
 - **Automatic single-connection fallback** — detects when a server doesn't
   support byte ranges (or lies about it mid-download) and switches seamlessly.
-- **Configurable** — max connections per file, max concurrent downloads,
-  download folder (global + per-request override).
+- **Configurable (IDM-style)** — max connections per file (1–32), max concurrent
+  downloads, download folder (global + per-request override), **global speed
+  limit**, **download categories** (auto-sort by file type into subfolders), and
+  **theme** (system / light / dark).
 - **Pause / resume / cancel**, including crash-safe resume (validated against
   the server's size + ETag so you never stitch together mismatched bytes).
 - **Persistent download queue** — the list of downloads is saved to disk, so it
@@ -167,10 +169,20 @@ You can also change them from the extension popup. Keys:
 
 | Key | Meaning | Default |
 |-----|---------|---------|
-| `download_dir` | Where files are saved | `~/Downloads` |
-| `max_connections_per_file` | Segments per file | `8` |
+| `download_dir` | Base folder where files are saved | `~/Downloads` |
+| `max_connections_per_file` | Segments per file (clamped 1–32) | `8` |
 | `max_concurrent_downloads` | Files downloading at once | `4` |
 | `speed_limit` | Global bytes/sec cap (`null` = unlimited) | `null` |
+| `use_categories` | Auto-sort files into category subfolders | `true` |
+| `categories` | Extension → subfolder rules (first match wins) | Video/Audio/Documents/Programs/Archives/Images |
+| `theme` | UI theme: `system` / `light` / `dark` | `system` |
+
+### Download categories
+
+When `use_categories` is on, a file is saved into `download_dir/<subfolder>` based
+on its extension — e.g. `movie.mkv` → `Downloads/Video/`, `report.pdf` →
+`Downloads/Documents/`. Unknown extensions stay in the base folder. An explicit
+per-request save folder always overrides categories. Edit the rules in settings.
 
 ## License
 

@@ -54,13 +54,24 @@ and the Firefox native-host registration path are needed.
 - [ ] Note Firefox's `allowed_extensions` (by extension ID) vs Chrome's
       `allowed_origins` in the host manifest.
 
-## 3. Speed limiting (enforce `Settings.speed_limit`)  — PLANNED
+## 3. Speed limiting (enforce `Settings.speed_limit`)  — ✅ DONE
 
-The setting is plumbed through but not enforced in the download loop.
+Implemented as a shared token-bucket `RateLimiter` (`engine/src/ratelimit.rs`).
 
-- [ ] Global token-bucket / rate limiter shared across active segments.
-- [ ] Optional per-download limit.
-- [ ] Apply in both the segmented and media-segment download paths.
+- [x] Global token-bucket / rate limiter shared across active segments.
+- [x] Applied in both the segmented and media-segment download paths.
+- [x] Adjustable at runtime via `Manager::update_settings`.
+- [ ] Optional *per-download* limit (currently global only).
+
+## Tier 1 — IDM-style configurability  — ✅ DONE
+
+- [x] **Download categories** — `Settings.categories` + `category_dir_for()`
+      auto-sort files into subfolders (Video/Audio/Documents/Programs/Archives/
+      Images) by extension; toggle with `use_categories`.
+- [x] **Speed limiting** — see #3 above.
+- [x] **Connection count** — `effective_connections()` clamps to 1–32; exposed
+      in host/app settings.
+- [x] **Theme** — `Settings.theme` (system/light/dark); applied by the app UI.
 
 ## 4. Resume for HLS/DASH media downloads  — PLANNED
 

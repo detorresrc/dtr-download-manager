@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
         max_concurrent_downloads: 1,
         speed_limit: None,
         min_split_size: 1,
+        ..Settings::default()
     };
 
     let (manager, mut rx) = Manager::new(settings);

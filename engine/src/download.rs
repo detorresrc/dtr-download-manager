@@ -9,6 +9,7 @@
 //!     download can resume without re-fetching bytes.
 
 use crate::probe::probe;
+use crate::ratelimit::RateLimiter;
 use crate::segment::{plan, Segment};
 use crate::state::DownloadState;
 use crate::types::{DownloadRequest, Progress, Settings, Status};
@@ -83,15 +84,16 @@ pub async fn download(
     handle: Handle,
     tx: mpsc::UnboundedSender<Progress>,
 ) -> Result<PathBuf> {
-    download_with_target_sink(client, id, req, settings, handle, tx, None).await
+    // Standalone callers get a limiter derived from the settings' speed_limit.
+    let limiter = Arc::new(RateLimiter::new(settings.speed_limit));
+    download_full(client, id, req, settings, handle, tx, None, limiter).await
 }
 
 /// Type of the optional callback invoked once with the resolved output path, so
 /// a caller (the Manager) can persist it for deterministic resume.
 pub type TargetSink = std::sync::Arc<dyn Fn(PathBuf) + Send + Sync>;
 
-/// Like [`download`], but also reports the resolved target path to `target_sink`
-/// as soon as it's known (before bytes are written).
+/// Like [`download`], but also reports the resolved target path to `target_sink`.
 pub async fn download_with_target_sink(
     client: Client,
     id: String,
@@ -100,6 +102,23 @@ pub async fn download_with_target_sink(
     handle: Handle,
     tx: mpsc::UnboundedSender<Progress>,
     target_sink: Option<TargetSink>,
+) -> Result<PathBuf> {
+    let limiter = Arc::new(RateLimiter::new(settings.speed_limit));
+    download_full(client, id, req, settings, handle, tx, target_sink, limiter).await
+}
+
+/// The full download entry point, with an explicit shared rate limiter so the
+/// `Manager` can enforce a single global bandwidth cap across all downloads.
+#[allow(clippy::too_many_arguments)]
+pub async fn download_full(
+    client: Client,
+    id: String,
+    req: DownloadRequest,
+    settings: Settings,
+    handle: Handle,
+    tx: mpsc::UnboundedSender<Progress>,
+    target_sink: Option<TargetSink>,
+    limiter: Arc<RateLimiter>,
 ) -> Result<PathBuf> {
     let emit = |status: Status, downloaded: u64, total: Option<u64>, speed: u64, conns: usize, err: Option<String>| {
         let _ = tx.send(Progress {
@@ -120,7 +139,7 @@ pub async fn download_with_target_sink(
         crate::types::DownloadKind::Hls | crate::types::DownloadKind::Dash
     ) {
         return crate::media_download::download_media(
-            client, id, req, settings, handle, tx, target_sink,
+            client, id, req, settings, handle, tx, target_sink, limiter,
         )
         .await;
     }
@@ -137,10 +156,12 @@ pub async fn download_with_target_sink(
         }
         t
     } else {
-        let dir = req
-            .save_dir
-            .clone()
-            .unwrap_or_else(|| settings.download_dir.clone());
+        // An explicit per-request save_dir always wins. Otherwise apply the
+        // category auto-foldering rules to the base download dir.
+        let dir = match &req.save_dir {
+            Some(d) => d.clone(),
+            None => settings.category_dir_for(&probe_result.filename),
+        };
         tokio::fs::create_dir_all(&dir)
             .await
             .with_context(|| format!("creating download dir {}", dir.display()))?;
@@ -212,7 +233,8 @@ pub async fn download_with_target_sink(
             file.clone(),
             downloaded.clone(),
             &handle,
-            settings.max_connections_per_file,
+            settings.effective_connections(),
+            &limiter,
         )
         .await
     } else {
@@ -223,6 +245,7 @@ pub async fn download_with_target_sink(
             file.clone(),
             downloaded.clone(),
             &handle,
+            &limiter,
         )
         .await
     };
@@ -247,6 +270,7 @@ pub async fn download_with_target_sink(
                 file.clone(),
                 downloaded.clone(),
                 &handle,
+                &limiter,
             )
             .await;
         }
@@ -310,6 +334,7 @@ async fn run_segmented(
     downloaded: Arc<AtomicU64>,
     handle: &Handle,
     max_parallel: usize,
+    limiter: &Arc<RateLimiter>,
 ) -> Result<()> {
     let base_headers = build_headers(req)?;
     let mut in_flight = FuturesUnordered::new();
@@ -344,6 +369,7 @@ async fn run_segmented(
                 downloaded.clone(),
                 progress.clone(),
                 handle.clone(),
+                limiter.clone(),
             ));
         }
 
@@ -375,6 +401,7 @@ async fn fetch_segment(
     downloaded: Arc<AtomicU64>,
     progress: Arc<tokio::sync::Mutex<SegmentProgress>>,
     handle: Handle,
+    limiter: Arc<RateLimiter>,
 ) -> Result<()> {
     headers.insert(
         RANGE,
@@ -417,6 +444,8 @@ async fn fetch_segment(
         let remaining = limit - offset + 1;
         let take = (chunk.len() as u64).min(remaining) as usize;
         let slice = &chunk[..take];
+        // Throttle to the shared global bandwidth cap (no-op when unlimited).
+        limiter.acquire(take as u64).await;
         {
             let mut f = file.lock().await;
             f.seek(SeekFrom::Start(offset)).await?;
@@ -449,6 +478,7 @@ async fn run_single_stream(
     file: Arc<tokio::sync::Mutex<File>>,
     downloaded: Arc<AtomicU64>,
     handle: &Handle,
+    limiter: &Arc<RateLimiter>,
 ) -> Result<()> {
     let mut headers = build_headers(req)?;
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
@@ -472,6 +502,7 @@ async fn run_single_stream(
         if handle.is_paused() {
             anyhow::bail!("paused");
         }
+        limiter.acquire(chunk.len() as u64).await;
         {
             let mut f = file.lock().await;
             f.write_all(&chunk).await?;
