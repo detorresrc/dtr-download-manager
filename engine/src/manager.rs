@@ -127,43 +127,49 @@ impl Manager {
         let settings = self.inner.settings.lock().await.clone();
         let (weekday, minute) = now_local_weekday_minute();
 
-        // Snapshot current records and the running set.
         let records = self.inner.registry.all().await;
-        let running = self.inner.running.lock().await.clone();
 
-        // Count how many are running per queue right now.
-        let mut running_per_queue: HashMap<String, usize> = HashMap::new();
-        for r in &records {
-            if running.contains(&r.id) {
-                *running_per_queue.entry(r.request.queue_id()).or_default() += 1;
-            }
-        }
+        // Decide what to start while HOLDING the running lock for the whole
+        // pass, so two concurrent ticks (the 500ms scheduler and the one
+        // triggered by enqueue/resume) can't both claim the same download and
+        // spawn it twice. We collect the ids to spawn, then spawn after.
+        let mut to_spawn: Vec<(String, DownloadRequest)> = Vec::new();
+        {
+            let mut running = self.inner.running.lock().await;
 
-        // Promote queued downloads, oldest first (records() is sorted by created_at).
-        for r in &records {
-            if r.status != Status::Queued {
-                continue;
+            let mut running_per_queue: HashMap<String, usize> = HashMap::new();
+            for r in &records {
+                if running.contains(&r.id) {
+                    *running_per_queue.entry(r.request.queue_id()).or_default() += 1;
+                }
             }
-            if running.contains(&r.id) {
-                continue; // already being started this tick
+
+            for r in &records {
+                if r.status != Status::Queued || running.contains(&r.id) {
+                    continue;
+                }
+                let qid = r.request.queue_id();
+                let q = settings.queue(&qid);
+                if !q.running || !q.schedule.is_active_at(weekday, minute) {
+                    continue;
+                }
+                let active = running_per_queue.get(&qid).copied().unwrap_or(0);
+                if active >= q.max_concurrent.max(1) {
+                    continue;
+                }
+                // Claim it atomically under the lock.
+                running.insert(r.id.clone());
+                *running_per_queue.entry(qid).or_default() += 1;
+                let mut req = r.request.clone();
+                if req.resolved_target.is_none() {
+                    req.resolved_target = r.target.clone();
+                }
+                to_spawn.push((r.id.clone(), req));
             }
-            let qid = r.request.queue_id();
-            let q = settings.queue(&qid);
-            if !q.running || !q.schedule.is_active_at(weekday, minute) {
-                continue;
-            }
-            let active = running_per_queue.get(&qid).copied().unwrap_or(0);
-            if active >= q.max_concurrent.max(1) {
-                continue;
-            }
-            // Eligible: mark running and spawn.
-            self.inner.running.lock().await.insert(r.id.clone());
-            *running_per_queue.entry(qid).or_default() += 1;
-            let mut req = r.request.clone();
-            if req.resolved_target.is_none() {
-                req.resolved_target = r.target.clone();
-            }
-            self.spawn_download(r.id.clone(), req).await;
+        } // running lock released here
+
+        for (id, req) in to_spawn {
+            self.spawn_download(id, req).await;
         }
     }
 
