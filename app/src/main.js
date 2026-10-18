@@ -100,8 +100,8 @@ function createItem(id, name) {
     await invoke("remove", { id });
     el.remove();
     downloads.delete(id);
-    // Suppress re-adding this row from the queue poll until the owning process
-    // (the host) actually removes it from the shared file.
+    // Briefly suppress re-adding this row in case a queue-file poll is already
+    // in flight with the pre-removal snapshot.
     recentlyRemoved.set(id, Date.now());
     if (downloads.size === 0) empty.style.display = "";
   };
