@@ -481,36 +481,100 @@ async fn run_single_stream(
     handle: &Handle,
     limiter: &Arc<RateLimiter>,
 ) -> Result<()> {
-    let mut headers = build_headers(req)?;
-    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
-    let mut resp = client
-        .get(&probe.final_url)
-        .headers(headers)
-        .send()
-        .await
-        .context("single-stream request failed")?
-        .error_for_status()
-        .context("single-stream bad status")?;
+    // Flaky file-hosts often drop the connection mid-stream ("reading chunk").
+    // Retry up to N times; when the server supports ranges, RESUME from the
+    // bytes we already have (Range header) instead of restarting from zero.
+    const MAX_ATTEMPTS: usize = 5;
+    let base_headers = build_headers(req)?;
 
-    {
-        let mut f = file.lock().await;
-        f.seek(SeekFrom::Start(0)).await?;
-    }
-    while let Some(chunk) = resp.chunk().await.context("reading chunk")? {
+    for attempt in 0..MAX_ATTEMPTS {
         if handle.is_canceled() {
             anyhow::bail!("canceled");
         }
         if handle.is_paused() {
             anyhow::bail!("paused");
         }
-        limiter.acquire(chunk.len() as u64).await;
+
+        let start = downloaded.load(Ordering::SeqCst);
+        let mut headers = base_headers.clone();
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        // Resume from `start` if possible (and we've made progress).
+        let resuming = start > 0 && probe.supports_ranges;
+        if resuming {
+            headers.insert(
+                RANGE,
+                HeaderValue::from_str(&format!("bytes={start}-")).expect("valid range"),
+            );
+        }
+
+        let send_result = client.get(&probe.final_url).headers(headers).send().await;
+        let resp = match send_result.and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                if attempt + 1 < MAX_ATTEMPTS {
+                    backoff(attempt).await;
+                    continue;
+                }
+                return Err(anyhow::Error::new(e).context("single-stream request failed"));
+            }
+        };
+
+        // Position the file: if we're resuming via range the server returns the
+        // tail from `start`, so seek there; otherwise (re)start at 0.
+        let write_from = if resuming && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+            start
+        } else {
+            // Server ignored the range (or first attempt): rewrite from scratch.
+            downloaded.store(0, Ordering::SeqCst);
+            0
+        };
         {
             let mut f = file.lock().await;
-            f.write_all(&chunk).await?;
+            f.seek(SeekFrom::Start(write_from)).await?;
         }
-        downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+
+        let mut resp = resp;
+        let stream_err = loop {
+            if handle.is_canceled() {
+                anyhow::bail!("canceled");
+            }
+            if handle.is_paused() {
+                anyhow::bail!("paused");
+            }
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    limiter.acquire(chunk.len() as u64).await;
+                    {
+                        let mut f = file.lock().await;
+                        f.write_all(&chunk).await?;
+                    }
+                    downloaded.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+                }
+                Ok(None) => return Ok(()),     // finished cleanly
+                Err(e) => break e,             // connection dropped → retry
+            }
+        };
+
+        // Stream broke. Retry (resuming) unless we're out of attempts.
+        if attempt + 1 < MAX_ATTEMPTS {
+            tracing::warn!(
+                "stream dropped at {} bytes (attempt {}/{}), retrying…",
+                downloaded.load(Ordering::SeqCst),
+                attempt + 1,
+                MAX_ATTEMPTS
+            );
+            backoff(attempt).await;
+            continue;
+        }
+        return Err(anyhow::Error::new(stream_err).context("reading chunk (gave up after retries)"));
     }
     Ok(())
+}
+
+/// Exponential-ish backoff between retry attempts (0.5s, 1s, 2s, 4s…).
+async fn backoff(attempt: usize) {
+    let secs = (1u64 << attempt.min(3)) as f64 * 0.5;
+    tokio::time::sleep(std::time::Duration::from_secs_f64(secs)).await;
 }
 
 /// Tracks per-segment completed bytes during a run, mirrored back into state.
