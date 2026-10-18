@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grab — Options</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        max-width: 520px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      h1 { font-size: 18px; }
+      p.help { color: #888; font-size: 13px; line-height: 1.5; }
+      label { display: block; font-size: 13px; margin: 14px 0 4px; font-weight: 600; }
+      input {
+        width: 100%;
+        padding: 9px 10px;
+        border: 1px solid #8884;
+        border-radius: 8px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .row { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
+      button {
+        padding: 9px 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #2d6cdf;
+        color: #fff;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover { background: #2559bd; }
+      button.ghost { background: transparent; border: 1px solid #8884; color: inherit; }
+      #status { font-size: 13px; margin-left: 4px; }
+      .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .up { background: #2d8a4e; } .down { background: #e25555; }
+    </style>
+  </head>
+  <body>
+    <h1>Grab Download Manager — Options</h1>
+    <p class="help">
+      Connect this extension to the Grab desktop app. Open Grab → Settings →
+      "Browser extension pairing", and copy the API URL's port and the token here.
+      The app must be running (it lives in the system tray).
+    </p>
+
+    <label for="port">App port</label>
+    <input id="port" type="number" min="1" max="65535" placeholder="17654" />
+
+    <label for="token">API token</label>
+    <input id="token" type="text" placeholder="paste the token from Grab Settings" />
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="test" class="ghost">Test connection</button>
+      <span id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

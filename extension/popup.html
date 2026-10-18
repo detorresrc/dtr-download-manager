@@ -7,12 +7,15 @@
     <style>
       :root { color-scheme: light dark; }
       body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         width: 320px;
         margin: 0;
         padding: 14px;
       }
-      h1 { font-size: 15px; margin: 0 0 10px; }
+      h1 { font-size: 15px; margin: 0 0 8px; }
+      .status-line { display: flex; align-items: center; gap: 7px; font-size: 12px; margin-bottom: 12px; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: #aaa; }
+      .dot.up { background: #2d8a4e; } .dot.down { background: #e25555; }
       .row { display: flex; gap: 6px; margin-bottom: 10px; }
       input[type="text"] {
         flex: 1;
@@ -22,45 +25,35 @@
         font-size: 13px;
       }
       button {
-        padding: 7px 12px;
-        border: 0;
-        border-radius: 6px;
-        background: #2d6cdf;
-        color: #fff;
-        font-size: 13px;
-        cursor: pointer;
+        padding: 7px 12px; border: 0; border-radius: 6px;
+        background: #2d6cdf; color: #fff; font-size: 13px; cursor: pointer;
       }
       button:hover { background: #2559bd; }
-      fieldset { border: 1px solid #8884; border-radius: 8px; margin: 0 0 10px; }
-      legend { font-size: 12px; color: #888; }
-      label { display: block; font-size: 12px; margin: 6px 0 2px; }
-      .small { font-size: 11px; color: #888; }
-      #status { font-size: 12px; min-height: 16px; color: #2d8a4e; }
+      button.ghost { background: transparent; border: 1px solid #8884; color: inherit; }
+      #msg { font-size: 12px; min-height: 16px; color: #2d8a4e; }
+      .foot { font-size: 11px; color: #888; margin-top: 8px; }
+      a { color: #2d6cdf; cursor: pointer; }
     </style>
   </head>
   <body>
     <h1>Grab Download Manager</h1>
+
+    <div class="status-line">
+      <span id="dot" class="dot"></span>
+      <span id="status-text">Checking Grab app…</span>
+    </div>
 
     <div class="row">
       <input id="url" type="text" placeholder="Paste a URL to download…" />
       <button id="go">Download</button>
     </div>
 
-    <fieldset>
-      <legend>Settings</legend>
-      <label for="dir">Download folder</label>
-      <input id="dir" type="text" placeholder="(leave blank for default)" />
-      <label for="conns">Max connections per file</label>
-      <input id="conns" type="text" placeholder="8" />
-      <label for="concurrent">Max concurrent downloads</label>
-      <input id="concurrent" type="text" placeholder="4" />
-      <div class="row" style="margin-top: 8px">
-        <button id="save">Save settings</button>
-      </div>
-      <div class="small">Settings are stored by the Grab desktop app.</div>
-    </fieldset>
+    <div id="msg"></div>
+    <div class="foot">
+      Downloads are handled by the Grab desktop app. Manage settings there.
+      <a id="open-options">Pairing / options</a>
+    </div>
 
-    <div id="status"></div>
     <script src="popup.js"></script>
   </body>
 </html>
