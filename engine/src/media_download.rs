@@ -38,6 +38,7 @@ pub async fn download_media(
             downloaded: done,
             total,
             speed,
+            eta_secs: None, // set in the periodic reporter where we track segment rate
             connections: conns,
             error: err,
         });
@@ -116,26 +117,52 @@ pub async fn download_media(
         });
     }
 
-    // Progress reporter (1s cadence) over segment counts + bytes.
+    // Progress reporter (1s cadence): `speed` is the smoothed BYTE throughput
+    // (so the UI shows MB/s), while the ETA is SEGMENT-based — estimated from
+    // how fast segments are completing, since for streams the total byte size
+    // isn't known up front (only the segment count is).
     let reporter = {
         let tx = tx.clone();
         let id = id.clone();
         let completed = completed.clone();
         let bytes = bytes.clone();
         tokio::spawn(async move {
-            let mut last = 0u64;
+            let mut last_bytes = 0u64;
+            let mut last_segs = 0u64;
+            const ALPHA: f64 = 0.3;
+            let mut avg_bps = 0.0f64;
+            let mut avg_sps = 0.0f64; // segments/sec
+            let mut seeded = false;
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
             loop {
                 ticker.tick().await;
-                let now = bytes.load(Ordering::SeqCst);
-                let speed = now.saturating_sub(last);
-                last = now;
+                let nb = bytes.load(Ordering::SeqCst);
+                let ns = completed.load(Ordering::SeqCst);
+                let dbytes = nb.saturating_sub(last_bytes) as f64;
+                let dsegs = ns.saturating_sub(last_segs) as f64;
+                last_bytes = nb;
+                last_segs = ns;
+                if !seeded {
+                    avg_bps = dbytes;
+                    avg_sps = dsegs;
+                    seeded = true;
+                } else {
+                    avg_bps = ALPHA * dbytes + (1.0 - ALPHA) * avg_bps;
+                    avg_sps = ALPHA * dsegs + (1.0 - ALPHA) * avg_sps;
+                }
+                // Seconds to finish the remaining segments at the current rate.
+                let eta = if avg_sps > 0.0 && ns < total_segments {
+                    Some(((total_segments - ns) as f64 / avg_sps).round() as u64)
+                } else {
+                    None
+                };
                 let _ = tx.send(Progress {
                     id: id.clone(),
                     status: Status::Downloading,
-                    downloaded: completed.load(Ordering::SeqCst),
+                    downloaded: ns,
                     total: Some(total_segments),
-                    speed,
+                    speed: avg_bps.round() as u64,
+                    eta_secs: eta,
                     connections: 0,
                     error: None,
                 });

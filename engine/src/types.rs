@@ -364,12 +364,29 @@ pub struct Progress {
     pub status: Status,
     pub downloaded: u64,
     pub total: Option<u64>,
-    /// Instantaneous speed in bytes/sec.
+    /// Smoothed speed in bytes/sec (exponential moving average, less jittery
+    /// than a raw 1-second sample — better for display and ETA).
     pub speed: u64,
+    /// Estimated seconds remaining, if total size and a non-zero speed are
+    /// known. `None` when the size is unknown or the download is stalled.
+    #[serde(default)]
+    pub eta_secs: Option<u64>,
     /// Number of active connections for this download.
     pub connections: usize,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+impl Progress {
+    /// Compute seconds remaining from the current counters. `None` if the total
+    /// is unknown or speed is zero (can't estimate).
+    pub fn estimate_eta(downloaded: u64, total: Option<u64>, speed: u64) -> Option<u64> {
+        let total = total?;
+        if speed == 0 || downloaded >= total {
+            return None;
+        }
+        Some((total - downloaded) / speed)
+    }
 }
 
 #[cfg(test)]

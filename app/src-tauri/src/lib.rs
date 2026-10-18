@@ -196,6 +196,7 @@ struct ProgressEvent {
     downloaded: u64,
     total: Option<u64>,
     speed: u64,
+    eta_secs: Option<u64>,
     connections: usize,
     error: Option<String>,
 }
@@ -208,6 +209,7 @@ impl From<&Progress> for ProgressEvent {
             downloaded: p.downloaded,
             total: p.total,
             speed: p.speed,
+            eta_secs: p.eta_secs,
             connections: p.connections,
             error: p.error.clone(),
         }
