@@ -171,7 +171,29 @@ impl Manager {
 
     /// Re-queue downloads that were unfinished at last shutdown. They enter the
     /// `Queued` state; the scheduler starts them subject to queue rules.
+    ///
+    /// Also reconciles orphaned `.grabpart` sidecars in the download dir — a
+    /// safety net in case the queue file was deleted, so partial downloads are
+    /// recovered rather than stranded.
     pub async fn restore(&self) -> Vec<String> {
+        // Recover any orphaned partial downloads first (e.g. after queue.json
+        // was deleted), using fresh ids past the current max.
+        let download_dir = { self.inner.settings.lock().await.download_dir.clone() };
+        let next_id = self.inner.registry.max_numeric_id().await + 1;
+        let recovered = self
+            .inner
+            .registry
+            .reconcile_orphans(&download_dir, next_id)
+            .await;
+        if !recovered.is_empty() {
+            tracing::info!("recovered {} orphaned partial download(s)", recovered.len());
+            // Keep the id counter ahead of the recovered ids.
+            let new_max = self.inner.registry.max_numeric_id().await;
+            self.inner
+                .next_id
+                .store(new_max + 1, std::sync::atomic::Ordering::SeqCst);
+        }
+
         let unfinished = self.inner.registry.unfinished().await;
         let mut ids = Vec::new();
         for record in &unfinished {

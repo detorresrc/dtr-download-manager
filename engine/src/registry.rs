@@ -112,6 +112,70 @@ impl Registry {
         v
     }
 
+    /// Scan `dir` for orphaned `.grabpart` sidecars — partial downloads whose
+    /// queue record was lost (e.g. queue.json was deleted) — and re-add a record
+    /// for each so the download can be resumed instead of being stranded.
+    ///
+    /// `next_id` supplies fresh ids (e.g. from `max_numeric_id() + 1`); returns
+    /// the ids added. Safe to call on startup.
+    pub async fn reconcile_orphans(&self, dir: &Path, mut next_id: u64) -> Vec<String> {
+        // Collect targets we already track so we don't duplicate them.
+        let known_targets: std::collections::HashSet<PathBuf> = {
+            let inner = self.inner.lock().await;
+            inner
+                .records
+                .values()
+                .filter_map(|r| r.target.clone())
+                .collect()
+        };
+
+        let mut added = Vec::new();
+        let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+            return added;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let part = entry.path();
+            if part.extension().map(|e| e == "grabpart").unwrap_or(false) {
+                // The real target is the sidecar path without the ".grabpart".
+                let target = strip_grabpart(&part);
+                if known_targets.contains(&target) {
+                    continue; // already tracked
+                }
+                // Parse the sidecar to recover the URL and progress.
+                let Ok(bytes) = tokio::fs::read(&part).await else { continue };
+                let Ok(state) = serde_json::from_slice::<crate::state::DownloadState>(&bytes) else {
+                    continue;
+                };
+                let id = format!("dl-{next_id}");
+                next_id += 1;
+                let mut req = crate::types::DownloadRequest {
+                    url: state.url.clone(),
+                    filename: target
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_string()),
+                    headers: Default::default(),
+                    save_dir: None,
+                    kind: None,
+                    // Resume to the SAME file.
+                    resolved_target: Some(target.clone()),
+                    queue: None,
+                };
+                // Keep category routing from re-moving the file.
+                let _ = &mut req;
+                let mut record = DownloadRecord::new(id.clone(), req);
+                record.target = Some(target);
+                record.status = Status::Paused; // unfinished; resume will pick it up
+                record.downloaded = state.total_completed();
+                record.total = state.content_length;
+                self.upsert(record).await;
+                tracing::info!("recovered orphaned partial download as {id}");
+                added.push(id);
+            }
+        }
+        added
+    }
+
     /// The highest numeric suffix seen in existing `dl-N` ids, so a restarted
     /// manager can continue the id sequence instead of colliding from 1.
     pub async fn max_numeric_id(&self) -> u64 {
@@ -126,18 +190,60 @@ impl Registry {
     }
 }
 
+/// Turn `/path/to/file.zip.grabpart` back into `/path/to/file.zip`.
+fn strip_grabpart(part: &Path) -> PathBuf {
+    let s = part.to_string_lossy();
+    match s.strip_suffix(".grabpart") {
+        Some(base) => PathBuf::from(base),
+        None => part.to_path_buf(),
+    }
+}
+
+/// Path of the backup copy kept alongside the queue file.
+fn backup_path(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(".bak");
+    PathBuf::from(s)
+}
+
+/// Load the registry, tolerating an accidentally deleted or corrupted main
+/// file by falling back to the `.bak` copy written on the previous save.
 async fn load(path: &Path) -> Option<HashMap<String, DownloadRecord>> {
+    if let Some(map) = load_file(path).await {
+        return Some(map);
+    }
+    // Main file missing or unparseable: try the backup.
+    let bak = backup_path(path);
+    if let Some(map) = load_file(&bak).await {
+        tracing::warn!(
+            "queue file {} missing/corrupt; recovered from backup {}",
+            path.display(),
+            bak.display()
+        );
+        return Some(map);
+    }
+    None
+}
+
+async fn load_file(path: &Path) -> Option<HashMap<String, DownloadRecord>> {
     let bytes = tokio::fs::read(path).await.ok()?;
     let records: Vec<DownloadRecord> = serde_json::from_slice(&bytes).ok()?;
     Some(records.into_iter().map(|r| (r.id.clone(), r)).collect())
 }
 
 /// Atomically persist the registry: write to `<path>.tmp` then rename over the
-/// real file so readers never see a half-written file.
+/// real file so readers never see a half-written file. Before overwriting, the
+/// previous good file is copied to `<path>.bak` so an accidental deletion or a
+/// corrupt write can be recovered on the next load.
 async fn save(path: &Path, records: &HashMap<String, DownloadRecord>) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.ok();
     }
+    // Keep the current good file as a backup before we replace it.
+    if tokio::fs::try_exists(path).await.unwrap_or(false) {
+        let _ = tokio::fs::copy(path, backup_path(path)).await;
+    }
+
     let mut list: Vec<&DownloadRecord> = records.values().collect();
     list.sort_by_key(|r| r.created_at);
     let json = serde_json::to_vec_pretty(&list).expect("serializable records");
@@ -201,6 +307,74 @@ mod tests {
         reg.upsert(DownloadRecord::new("dl-1".into(), req("https://a/1"))).await;
         reg.remove("dl-1").await;
         assert!(reg.all().await.is_empty());
+
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn recovers_from_backup_when_main_file_deleted() {
+        let dir = std::env::temp_dir().join(format!("grab-reg3-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("queue.json");
+
+        {
+            let reg = Registry::open(path.clone()).await;
+            reg.upsert(DownloadRecord::new("dl-1".into(), req("https://a/1"))).await;
+            // A second write creates the .bak from the first good file.
+            reg.upsert(DownloadRecord::new("dl-2".into(), req("https://a/2"))).await;
+        }
+        // Simulate an accidental deletion of the main queue file.
+        tokio::fs::remove_file(&path).await.unwrap();
+        assert!(backup_path(&path).exists(), "backup should exist");
+
+        // Reopen: should transparently recover from the .bak.
+        let reg = Registry::open(path.clone()).await;
+        let all = reg.all().await;
+        assert!(!all.is_empty(), "records should be recovered from backup");
+
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn reconciles_orphaned_grabpart() {
+        use crate::segment::Segment;
+        use crate::state::DownloadState;
+
+        let dir = std::env::temp_dir().join(format!("grab-reg4-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let queue = dir.join("queue.json");
+
+        // An orphaned partial: a .grabpart sidecar with no queue record.
+        let target = dir.join("movie.mp4");
+        let state = DownloadState {
+            url: "https://cdn/movie.mp4".into(),
+            content_length: Some(1000),
+            etag: None,
+            last_modified: None,
+            segments: vec![Segment { start: 0, end: 999, completed: 400 }],
+        };
+        let part = {
+            let mut s = target.clone().into_os_string();
+            s.push(".grabpart");
+            std::path::PathBuf::from(s)
+        };
+        tokio::fs::write(&part, serde_json::to_vec(&state).unwrap())
+            .await
+            .unwrap();
+
+        let reg = Registry::open(queue.clone()).await;
+        let added = reg.reconcile_orphans(&dir, 1).await;
+        assert_eq!(added.len(), 1, "should recover the orphaned partial");
+
+        let rec = reg.all().await.into_iter().next().unwrap();
+        assert_eq!(rec.target.as_deref(), Some(target.as_path()));
+        assert_eq!(rec.downloaded, 400);
+        assert_eq!(rec.total, Some(1000));
+        assert_eq!(rec.request.resolved_target.as_deref(), Some(target.as_path()));
+
+        // Running it again must NOT duplicate the now-tracked target.
+        let again = reg.reconcile_orphans(&dir, 2).await;
+        assert!(again.is_empty(), "already-tracked target must not be re-added");
 
         tokio::fs::remove_dir_all(&dir).await.ok();
     }
