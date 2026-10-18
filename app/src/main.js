@@ -109,6 +109,20 @@ function createItem(id, name) {
   downloads.set(id, { el, name });
 }
 
+// Update a row's displayed filename (and remembered name). Used to replace an
+// id placeholder like "dl-2" once the real filename is known. Only relabels
+// when the new name is a real filename and differs from what's shown, so we
+// never overwrite a good name with a guess.
+function setName(id, name) {
+  const entry = downloads.get(id);
+  if (!entry || !name) return;
+  const looksReal = name !== id && /\.[A-Za-z0-9]{1,8}$/.test(name);
+  if (looksReal && entry.name !== name) {
+    entry.name = name;
+    entry.el.querySelector(".name").textContent = name;
+  }
+}
+
 // Refresh the list from the SHARED queue file on disk. This surfaces downloads
 // started by the browser (handled by the native host, a separate process that
 // writes the same queue.json). Called on startup and then polled every second,
@@ -132,9 +146,15 @@ async function refreshFromQueue() {
     seen.add(r.id);
     // Don't resurrect a row the user just removed (host clears it shortly).
     if (Date.now() - (recentlyRemoved.get(r.id) || 0) < 5000) continue;
-    const name = r.target ? r.target.split(/[\\/]/).pop() : guessName(r.request.url);
+    // Prefer the resolved on-disk filename; fall back to a URL guess.
+    const name = r.target ? r.target.split(/[\\/]/).pop() : guessName(r.request && r.request.url);
     if (!downloads.has(r.id)) {
       createItem(r.id, name);
+    } else {
+      // Relabel if the real filename is now known (the row may have been
+      // created from a live progress event before `target` existed, using the
+      // id as a placeholder — e.g. "dl-2").
+      setName(r.id, name);
     }
     // Skip if a live event updated this item in the last 2s (fresher than disk).
     if (Date.now() - (lastEventAt.get(r.id) || 0) < 2000) continue;
