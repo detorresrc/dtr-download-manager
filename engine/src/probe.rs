@@ -114,22 +114,58 @@ fn parse_content_range_total(headers: &HeaderMap) -> Option<u64> {
     total.parse::<u64>().ok()
 }
 
-/// Resolve the best filename: Content-Disposition > URL path > request hint > fallback.
+/// Resolve the best filename. Priority:
+///   1. `Content-Disposition` (the server's explicit name — most authoritative)
+///   2. The caller's hint IF it looks like a real filename (has an extension) —
+///      e.g. the browser's suggested name for a download-page/redirect URL whose
+///      path carries no usable name.
+///   3. The URL path's last segment, if usable.
+///   4. The caller's hint even without an extension.
+///   5. `"download"`.
 fn resolve_filename(req: &DownloadRequest, final_url: &str, headers: &HeaderMap) -> String {
     if let Some(cd) = header_str(headers, &CONTENT_DISPOSITION) {
         if let Some(name) = filename_from_content_disposition(&cd) {
             return sanitize(&name);
         }
     }
+    // A hint with an extension (e.g. "PPSA21783.exfat" from the browser) beats a
+    // URL path, since download-page URLs often have no real filename in them.
+    if let Some(hint) = &req.filename {
+        if looks_like_filename(hint) {
+            return sanitize(hint);
+        }
+    }
+    if let Some(name) = filename_from_url(final_url) {
+        if !name.is_empty() && looks_like_filename(&name) {
+            return sanitize(&name);
+        }
+    }
+    if let Some(hint) = &req.filename {
+        if !hint.trim().is_empty() {
+            return sanitize(hint);
+        }
+    }
+    // Last resort: a bare URL path segment (no extension) is still better than nothing.
     if let Some(name) = filename_from_url(final_url) {
         if !name.is_empty() {
             return sanitize(&name);
         }
     }
-    if let Some(hint) = &req.filename {
-        return sanitize(hint);
-    }
     "download".to_string()
+}
+
+/// A heuristic: does this look like an actual filename with a sensible
+/// extension (1–8 chars, alphanumeric), not a path fragment or query junk?
+fn looks_like_filename(name: &str) -> bool {
+    let name = name.trim();
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => {
+            !stem.is_empty()
+                && (1..=8).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        }
+        None => false,
+    }
 }
 
 /// Parse `filename*=UTF-8''name` (RFC 5987) or `filename="name"`.
@@ -254,5 +290,49 @@ mod tests {
     #[test]
     fn sanitize_strips_illegal() {
         assert_eq!(sanitize("a/b:c*?.txt"), "a_b_c__.txt");
+    }
+
+    #[test]
+    fn looks_like_filename_heuristic() {
+        assert!(looks_like_filename("PPSA21783.exfat"));
+        assert!(looks_like_filename("movie.mkv"));
+        assert!(!looks_like_filename("download")); // no extension
+        assert!(!looks_like_filename("a.verylongextension")); // ext too long
+        assert!(!looks_like_filename(".bashrc")); // empty stem
+    }
+
+    fn req_with(filename: Option<&str>) -> DownloadRequest {
+        DownloadRequest {
+            url: String::new(),
+            filename: filename.map(|s| s.to_string()),
+            headers: Default::default(),
+            save_dir: None,
+            kind: None,
+            resolved_target: None,
+            queue: None,
+        }
+    }
+
+    #[test]
+    fn hint_with_extension_beats_nameless_url() {
+        // Download-page URL with no real filename; browser forwarded a good name.
+        let req = req_with(Some("PPSA21783.exfat"));
+        let name = resolve_filename(&req, "https://host.net/download?id=abc123", &HeaderMap::new());
+        assert_eq!(name, "PPSA21783.exfat");
+    }
+
+    #[test]
+    fn content_disposition_still_wins_over_hint() {
+        let req = req_with(Some("hint.bin"));
+        let mut h = HeaderMap::new();
+        h.insert(CONTENT_DISPOSITION, HeaderValue::from_static("attachment; filename=\"real.zip\""));
+        assert_eq!(resolve_filename(&req, "https://x/y", &h), "real.zip");
+    }
+
+    #[test]
+    fn url_path_wins_when_it_has_a_real_name_and_no_hint() {
+        let req = req_with(None);
+        let name = resolve_filename(&req, "https://cdn.com/files/archive.tar.gz", &HeaderMap::new());
+        assert_eq!(name, "archive.tar.gz");
     }
 }

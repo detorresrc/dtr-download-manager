@@ -95,12 +95,15 @@ async function sendDownload(payload) {
 
 // ---- Download interception ---------------------------------------------------
 
-// Fires when Chrome has resolved a filename and is about to write to disk.
-chrome.downloads.onDeterminingFilename?.addListener((item) => {
+// Fires when Chrome has resolved the suggested filename and is about to write
+// to disk. This is the BEST place to grab the real name (item.filename is set
+// here, unlike onCreated where it's often empty).
+chrome.downloads.onDeterminingFilename?.addListener((item, suggest) => {
   handoff(item);
+  // Don't call suggest() — we intend to take the download over if the app is up.
 });
 
-// Fallback for versions without onDeterminingFilename.
+// Fallback for versions/cases without onDeterminingFilename.
 chrome.downloads.onCreated.addListener((item) => {
   if (!/^https?:/i.test(item.finalUrl || item.url || "")) return;
   handoff(item);
@@ -113,7 +116,11 @@ async function handoff(item) {
   handedOff.add(item.id);
 
   const headers = await buildHeaders(url, item.referrer);
-  const filename = item.filename ? baseName(item.filename) : undefined;
+  // Prefer Chrome's resolved suggested filename; fall back to the URL path.
+  // Chrome's `filename` already reflects Content-Disposition / the real name.
+  let filename;
+  if (item.filename) filename = baseName(item.filename);
+  else filename = filenameFromUrl(url);
 
   // CRITICAL: only cancel Chrome's own download AFTER the app accepts it. If
   // the app is down, we let Chrome finish normally so the file is never lost.
@@ -167,6 +174,18 @@ async function buildHeaders(url, referrer) {
 function baseName(path) {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || undefined;
+}
+
+// Derive a filename from a URL path (drops query/fragment). Returns undefined
+// if there's nothing usable — the app will then fall back to its own logic.
+function filenameFromUrl(url) {
+  try {
+    const p = new URL(url).pathname;
+    const last = p.split("/").filter(Boolean).pop();
+    return last ? decodeURIComponent(last) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---- notifications -----------------------------------------------------------
