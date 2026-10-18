@@ -7,10 +7,11 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager as _, State};
 use tokio::sync::Mutex;
 
-/// Shared app state: the engine manager plus the path to the settings file.
+/// Shared app state: the engine manager plus the paths to the shared files.
 struct AppState {
     manager: Mutex<Manager>,
     settings_path: PathBuf,
+    queue_path: PathBuf,
 }
 
 #[tauri::command]
@@ -70,6 +71,20 @@ async fn list_downloads(state: State<'_, Arc<AppState>>) -> Result<Vec<DownloadR
     Ok(state.manager.lock().await.records().await)
 }
 
+/// Read the SHARED queue file directly from disk. This surfaces downloads
+/// started by the native host (Chrome) — which runs in a separate process and
+/// writes the same `queue.json` — so the GUI can act as a live dashboard. The
+/// app polls this. Returns an empty list if the file doesn't exist yet.
+#[tauri::command]
+async fn read_queue_file(state: State<'_, Arc<AppState>>) -> Result<Vec<DownloadRecord>, String> {
+    match tokio::fs::read(&state.queue_path).await {
+        Ok(bytes) => {
+            serde_json::from_slice::<Vec<DownloadRecord>>(&bytes).map_err(|e| e.to_string())
+        }
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
 #[tauri::command]
 async fn remove(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     let manager = state.manager.lock().await;
@@ -126,19 +141,22 @@ pub fn run() {
             let queue_path = config_dir().join("queue.json");
             let settings = load_settings(&settings_path);
 
-            // Build a persistent manager and restore unfinished downloads.
+            // Build a persistent manager for downloads started FROM the app.
+            //
+            // We deliberately do NOT call `restore()` here: the native host
+            // (launched by Chrome) is a separate process that owns the same
+            // `queue.json` and resumes unfinished downloads itself. If the app
+            // also restored them, two engines would race over the same files.
+            // The app instead polls `read_queue_file` to DISPLAY the host's
+            // downloads as a live dashboard.
             let (manager, mut progress_rx) = tauri::async_runtime::block_on(async {
-                let (m, rx) = Manager::with_persistence(settings, queue_path).await;
-                let restored = m.restore().await;
-                if !restored.is_empty() {
-                    eprintln!("restored {} unfinished download(s)", restored.len());
-                }
-                (m, rx)
+                Manager::with_persistence(settings, queue_path.clone()).await
             });
 
             let state = Arc::new(AppState {
                 manager: Mutex::new(manager),
                 settings_path,
+                queue_path,
             });
             app.manage(state);
 
@@ -159,6 +177,7 @@ pub fn run() {
             get_settings,
             save_settings,
             list_downloads,
+            read_queue_file,
             remove,
             pause_all,
             start_all,

@@ -91,29 +91,46 @@ function createItem(id, name) {
   downloads.set(id, { el, name });
 }
 
-// Repopulate the list from the persisted queue on startup.
-async function restoreList() {
+// Refresh the list from the SHARED queue file on disk. This surfaces downloads
+// started by the browser (handled by the native host, a separate process that
+// writes the same queue.json). Called on startup and then polled every second,
+// so host-driven and pending downloads appear and update live in the window.
+//
+// Live progress events (from downloads started IN the app) still arrive via the
+// "progress" listener; for those the event is fresher, so we don't overwrite a
+// just-updated item with a slightly stale file read.
+let lastEventAt = new Map(); // id -> timestamp of last live progress event
+
+async function refreshFromQueue() {
+  let records;
   try {
-    const records = await invoke("list_downloads");
-    for (const r of records) {
-      const name = r.target
-        ? r.target.split(/[\\/]/).pop()
-        : guessName(r.request.url);
-      createItem(r.id, name);
-      updateItem({
-        id: r.id,
-        status: r.status,
-        downloaded: r.downloaded || 0,
-        total: r.total,
-        speed: 0,
-        connections: 0,
-        error: r.error,
-      });
-    }
+    records = await invoke("read_queue_file");
   } catch (e) {
-    console.warn("Could not load saved downloads:", e);
+    return; // file may not exist yet; try again next tick
+  }
+  const seen = new Set();
+  for (const r of records) {
+    seen.add(r.id);
+    const name = r.target ? r.target.split(/[\\/]/).pop() : guessName(r.request.url);
+    if (!downloads.has(r.id)) {
+      createItem(r.id, name);
+    }
+    // Skip if a live event updated this item in the last 2s (fresher than disk).
+    if (Date.now() - (lastEventAt.get(r.id) || 0) < 2000) continue;
+    updateItem({
+      id: r.id,
+      status: r.status,
+      downloaded: r.downloaded || 0,
+      total: r.total,
+      speed: 0,
+      connections: 0,
+      error: r.error,
+    });
   }
 }
+
+// Alias kept for the startup call site.
+const restoreList = refreshFromQueue;
 
 function updateItem(p) {
   let entry = downloads.get(p.id);
@@ -145,15 +162,22 @@ function updateItem(p) {
   }
 }
 
-listen("progress", (event) => updateItem(event.payload));
+listen("progress", (event) => {
+  const p = event.payload;
+  lastEventAt.set(p.id, Date.now()); // mark as freshly updated by a live event
+  updateItem(p);
+});
 
-// Load any downloads persisted from a previous session, apply the theme, and
-// populate the queue picker.
-restoreList();
+// Show the shared queue on startup, apply the theme, populate the queue picker.
+refreshFromQueue();
 loadQueues();
 invoke("get_settings")
   .then((s) => applyTheme(s.theme || "system"))
   .catch(() => {});
+
+// Poll the shared queue file so downloads started from the browser (handled by
+// the separate native-host process) appear and update live in this window.
+setInterval(refreshFromQueue, 1000);
 
 // ---- Settings ---------------------------------------------------------------
 
