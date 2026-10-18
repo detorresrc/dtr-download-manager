@@ -1,3 +1,9 @@
+# The Tauri app is a standalone crate, intentionally OUTSIDE the root Cargo
+# workspace (engine + host) so its build stays isolated. This empty
+# `[workspace]` table makes this manifest its own workspace root, which stops
+# Cargo from trying to pull it into the parent workspace.
+[workspace]
+
 [package]
 name = "grab-app"
 version = "0.1.0"
