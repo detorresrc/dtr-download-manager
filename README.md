@@ -18,6 +18,23 @@ Chrome extension ──HTTP + bearer token──► Grab app (tray, always runni
                                              • window = dashboard
 ```
 
+### HTTP API
+
+The app serves these on `http://127.0.0.1:17654`. Every endpoint except `/ping`
+requires `Authorization: Bearer <token>` (the token from Settings → pairing).
+
+| Method & path | Purpose |
+|---|---|
+| `GET /ping` | Health check (no auth) → `{ ok, version }` |
+| `POST /downloads` | Queue a download → `{ id }`. Body: `url`, `filename?`, `headers?`, `save_dir?`, `kind?`, `queue?` |
+| `GET /downloads` | List all download records |
+| `POST /downloads/:id/pause` | Pause a download |
+| `POST /downloads/:id/resume` | Resume a download |
+| `POST /downloads/:id/cancel` | Cancel a download |
+| `DELETE /downloads/:id` | Remove a download from the queue |
+
+CORS is enabled, so any extension (Chrome, Firefox, …) can call it with the token.
+
 ## Status
 
 | Component | State |
@@ -43,8 +60,8 @@ Chrome extension ──HTTP + bearer token──► Grab app (tray, always runni
 - **Pause / resume / cancel**, including crash-safe resume (validated against
   the server's size + ETag so you never stitch together mismatched bytes).
 - **Persistent download queue** — the list of downloads is saved to disk, so it
-  survives app/host restarts. Unfinished downloads are automatically re-queued
-  and resumed on startup, writing to the *same* file (no collision copies).
+  survives app restarts. Unfinished downloads are automatically re-queued and
+  resumed on startup, writing to the *same* file (no collision copies).
 - **Multiple queues + scheduler (IDM-style)** — organize downloads into named
   queues, each with its own concurrency limit and optional time-window schedule
   (start/stop times, active weekdays). Pause/start individual queues or all at
@@ -152,12 +169,13 @@ lost.
 
 ## Configuration
 
-Settings live in a JSON file managed by the host:
+Settings are managed by the app (Settings dialog) and stored in a JSON file:
 
 - Linux: `~/.config/grab/settings.json`
 - Windows: `%APPDATA%\grab\settings.json`
 
-You can also change them from the extension popup. Keys:
+The app also keeps two more files in the same folder: `queue.json` (the download
+list) and `api_token` (the bearer token the extension pairs with). Settings keys:
 
 | Key | Meaning | Default |
 |-----|---------|---------|
