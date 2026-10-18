@@ -3,7 +3,7 @@
 //! The engine runs inside the desktop app (always-on, via tray + autostart).
 //! This module exposes its `Manager` over `http://127.0.0.1:<port>` so the
 //! Chrome extension can queue downloads and control them with simple `fetch()`
-//! calls — replacing the old native-messaging host.
+//! calls, using a simple `fetch()` with a bearer token.
 //!
 //! ## Security
 //! A localhost server is reachable by ANY process or web page on the machine

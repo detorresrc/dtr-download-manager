@@ -4,24 +4,32 @@ A cross-platform (Windows + Linux) download manager with multi-connection
 ("segmented") downloading and a Chrome extension — like Internet Download
 Manager, built with **Rust + Tauri**.
 
-The browser extension intercepts downloads and hands them to a fast native
-engine that splits each file into parallel byte-range segments, with automatic
-fallback to a single connection when the server doesn't support ranges.
+## Architecture
+
+The **desktop app is the single engine**. It runs a tiny localhost HTTP API and
+lives in the system tray (and can auto-start on boot), so it's always ready. The
+Chrome extension intercepts downloads and `fetch()`es them to that API — no
+native-messaging host, no separate background process.
+
+```
+Chrome extension ──HTTP + bearer token──► Grab app (tray, always running)
+  intercept + forward   POST /downloads      • the download engine
+  cookies / headers                          • localhost HTTP API (127.0.0.1:17654)
+                                             • window = dashboard
+```
 
 ## Status
 
 | Component | State |
 |-----------|-------|
-| `engine/` — segmented engine + queue persistence + HLS/DASH | ✅ working, tested (unit + live end-to-end) |
-| `host/` — native messaging host (Chrome ⇄ engine) | ✅ working, protocol verified |
-| `extension/` — Chrome MV3 extension | ✅ built (syntax-validated; load to test in Chrome) |
-| `scripts/` — host installers (Linux + Windows) | ✅ |
-| `app/` — Tauri 2 desktop GUI | ✅ code complete (build on a desktop) |
+| `engine/` — segmented engine + queue + HLS/DASH + HTTP API | ✅ working, tested (unit + live) |
+| `app/` — Tauri 2 desktop app (single engine, tray, autostart, HTTP API) | ✅ code complete (build on a desktop) |
+| `extension/` — Chrome MV3 extension (HTTP transport) | ✅ built (validated; load to test in Chrome) |
 | YouTube / site videos (yt-dlp) | ⏳ planned — see [TODO.md](TODO.md) |
-| Firefox extension | ⏳ planned — see [TODO.md](TODO.md) |
+| Firefox extension | ⏳ planned (now trivial — same HTTP API) |
 
-> **Planned work** (YouTube/site-video support via yt-dlp, Firefox, speed
-> limiting, HLS/DASH resume, and more) is tracked in **[TODO.md](TODO.md)**.
+> Progress + remaining work is tracked in **[TASKS.md](TASKS.md)**; the longer
+> backlog is in **[TODO.md](TODO.md)**.
 
 ## Features
 
@@ -72,96 +80,75 @@ The queue lives at `~/.config/grab/queue.json` (Linux) / `%APPDATA%\grab\queue.j
 status. Byte-level resume continues to use the per-file `.grabpart` sidecar next
 to each output file.
 
-## Architecture
-
-```
-┌──────────────┐   native messaging    ┌────────────────────┐
-│ Chrome       │  (length-prefixed     │ grab-host          │
-│ extension    │◄──── JSON / stdio ────►│ (native host)      │
-│ (MV3)        │                       │        │           │
-└──────────────┘                       │        ▼           │
-                                       │   grab-engine      │
-┌──────────────┐    Tauri commands     │ (segmented         │
-│ Tauri GUI    │◄─────────────────────►│  download engine)  │
-│ (app/)       │                       └────────────────────┘
-└──────────────┘
-```
-
-The `grab-engine` crate is UI-agnostic and shared by both the native host and
-the Tauri app.
-
 ## Build
 
 Requires a recent stable Rust toolchain.
 
-### Engine + native host (no GUI deps)
+### Engine (no GUI deps — fully testable in CI)
 
 ```bash
-# Engine + host
-cargo build --release -p grab-host
-
-# Run the engine's test suite
-cargo test -p grab-engine
-
-# Live end-to-end smoke test (downloads a real file and verifies it)
-cargo run -p grab-engine --example smoke
+cargo test -p grab-engine                 # unit tests
+cargo run -p grab-engine --example smoke  # live end-to-end download + verify
+cargo run -p grab-engine --example http_smoke  # live HTTP API test
 ```
 
 ### Desktop app (Tauri)
 
-The GUI needs the Tauri CLI and platform WebView libraries.
+The app needs the Tauri CLI and platform WebView libraries.
 
 ```bash
 # One-time: install the Tauri CLI
 npm install -g @tauri-apps/cli    # or: cargo install tauri-cli --version '^2'
 
 cd app
-npm install        # installs @tauri-apps/cli locally
-npm run dev        # run the app in development
+npm install
+npm run dev        # run in development
 npm run build      # produce a bundled installer
 ```
 
-**Linux build prerequisites** (Debian/Ubuntu example):
+**Linux build prerequisites** (Debian/Ubuntu):
 
 ```bash
 sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev build-essential
 ```
 
-On Fedora: `webkit2gtk4.1-devel gtk3-devel`. On Windows: the Microsoft
-Edge WebView2 runtime (preinstalled on Windows 11) and the MSVC build tools.
+On Fedora: `webkit2gtk4.1-devel gtk3-devel`. On Windows: the Microsoft Edge
+WebView2 runtime (preinstalled on Windows 11) + the MSVC build tools.
 
-> Note: the app was developed in a headless CI sandbox without WebView
-> libraries, so the GUI must be built/run on a real desktop. The engine and
-> native host are fully tested there; the Tauri layer is a thin wrapper around
-> the verified `grab-engine` API.
+> Note: the app is developed in a headless CI sandbox without WebView libraries,
+> so the GUI must be built/run on a real desktop. The `grab-engine` crate
+> (including the HTTP API) is fully tested there; the Tauri layer is a thin
+> wrapper around the verified engine.
 
-## Install the browser integration
+## Setup (run the app, then pair the extension)
 
-### 1. Load the Chrome extension
+No native-messaging host to install anymore — the app runs the HTTP API itself.
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the `extension/` folder.
-4. Copy the extension's **ID** (shown on its card).
+### 1. Run the Grab app
 
-### 2. Register the native host
+Build and launch it (`cd app && npm run build`, then run the produced binary).
+It sits in the **system tray**; closing the window hides it there so it keeps
+running to catch browser downloads. Enable **Start on login** in Settings so
+it's always ready. On first run it generates an API token.
 
-The browser needs to know where the `grab-host` binary lives. Build it first
-(`cargo build --release -p grab-host`), then:
+### 2. Load the Chrome extension
 
-**Linux**
-```bash
-./scripts/install-host-linux.sh <EXTENSION_ID>
-```
+1. `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
+   select the `extension/` folder.
 
-**Windows (PowerShell)**
-```powershell
-.\scripts\install-host-windows.ps1 -ExtensionId <EXTENSION_ID>
-```
+### 3. Pair the extension with the app
 
-Restart Chrome afterward. Now downloads you start in the browser (or via the
-extension popup / right-click **Download with Grab**) are handled by the engine.
+1. In the Grab app: **Settings → Browser extension pairing** — note the **API
+   URL port** and **token**.
+2. In Chrome: the Grab extension → **Options** (or the popup's "Pairing /
+   options" link) → enter the port and token → **Test connection** (should go
+   🟢).
+
+Now downloads you start in the browser (or via the extension popup / right-click
+**Download with Grab**) are handed to the app. If the app isn't running, the
+extension notifies you and lets Chrome download the file normally so nothing is
+lost.
 
 ## Configuration
 

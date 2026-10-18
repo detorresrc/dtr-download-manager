@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "engine",
-    "host",
 ]
 # The Tauri app (app/src-tauri) is its own workspace root; keep it out of this one.
 exclude = [

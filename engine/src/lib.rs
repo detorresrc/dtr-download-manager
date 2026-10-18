@@ -1,7 +1,8 @@
 //! grab-engine: a cross-platform segmented download engine.
 //!
-//! The engine is UI-agnostic: it's consumed by the Tauri desktop app and by the
-//! native-messaging host that talks to the browser extension.
+//! The engine is UI-agnostic: it's consumed by the Tauri desktop app, which
+//! also exposes it over a localhost HTTP API (see `http_api`) for the browser
+//! extension.
 
 pub mod download;
 #[cfg(feature = "http")]

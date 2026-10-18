@@ -103,13 +103,24 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
 - Note: manifest + all JS validated; the POST/ping/401 contract exercised against
   the real server here. **Needs your Chrome to verify the live round-trip.**
 
-### Phase 4 — Remove the old host  `[ ]`  (here)
-- [ ] Delete `host/` crate and workspace member
-- [ ] Delete native-messaging manifest template
-- [ ] Delete host installer scripts (Linux + Windows)
-- [ ] Remove interim `pending_action` control-channel code (no longer needed)
-- [ ] Update README (new setup: run app, pair token, no host install)
-- [ ] Update TODO/TASKS
+### Phase 4 — Remove the old host  `[x]`  (done & verified here)
+- [x] Delete `host/` crate and workspace member — *workspace builds without it*
+- [x] Delete native-messaging manifest template
+- [x] Delete host installer scripts (Linux + Windows)
+- [~] Keep `pending_action` control-channel code — INTENTIONALLY RETAINED: it's
+      harmless, tested, serde-default, and potentially useful (e.g. a future CLI
+      controlling the app via the queue file). Removing it would churn 4 files +
+      3 tests for no functional gain in the single-engine world.
+- [x] Update README (new setup: run app, pair token, no host install)
+- [x] Update TODO/TASKS
+
+---
+
+## ✅ Single-engine rewrite COMPLETE
+grab-host is gone. The Tauri app is the one engine, exposing a localhost HTTP
+API (token + CORS) that the Chrome extension calls. Tray + autostart keep it
+always-on. Engine + HTTP API fully tested in CI; GUI + extension round-trip
+need verification on a Windows desktop with Chrome.
 
 ---
 
