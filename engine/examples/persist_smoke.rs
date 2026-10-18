@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
                         save_dir: None,
                         kind: None,
             resolved_target: None,
+            queue: None,
                     })
                     .await;
                 // Let a little data flow (server is throttled), then return,

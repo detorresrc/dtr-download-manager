@@ -304,24 +304,7 @@ fn ensure_ext(name: &str, ext: &str) -> String {
     }
 }
 
+/// Reuse the engine's atomic, race-safe path reservation.
 async fn unique_path(dir: &std::path::Path, filename: &str) -> PathBuf {
-    let candidate = dir.join(filename);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let (stem, ext) = match filename.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s.to_string(), Some(e.to_string())),
-        _ => (filename.to_string(), None),
-    };
-    for i in 1..10_000 {
-        let name = match &ext {
-            Some(e) => format!("{stem} ({i}).{e}"),
-            None => format!("{stem} ({i})"),
-        };
-        let candidate = dir.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    dir.join(filename)
+    crate::download::unique_path(dir, filename).await
 }

@@ -9,7 +9,11 @@
   <body>
     <header>
       <h1>Grab</h1>
-      <button id="settings-btn" class="ghost" title="Settings">⚙</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="start-all-btn" class="ghost" title="Start all queues">▶ Start all</button>
+        <button id="pause-all-btn" class="ghost" title="Pause all queues">⏸ Pause all</button>
+        <button id="settings-btn" class="ghost" title="Settings">⚙</button>
+      </div>
     </header>
 
     <section class="add-bar">
@@ -19,6 +23,9 @@
         <option value="file">File</option>
         <option value="hls">HLS (.m3u8)</option>
         <option value="dash">DASH (.mpd)</option>
+      </select>
+      <select id="queue-select" title="Queue">
+        <!-- populated from settings.queues -->
       </select>
       <button id="add-btn">Download</button>
     </section>

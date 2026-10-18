@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
         save_dir: None,
         kind: None,
             resolved_target: None,
+            queue: None,
     };
     let r = tokio::time::timeout(std::time::Duration::from_secs(20), probe(&client, &req)).await??;
     println!("final_url     = {}", r.final_url);

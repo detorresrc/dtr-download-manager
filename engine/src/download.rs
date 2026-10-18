@@ -572,22 +572,40 @@ fn spawn_reporter(
 }
 
 /// Produce a non-colliding path: `name.ext`, then `name (1).ext`, etc.
-async fn unique_path(dir: &Path, filename: &str) -> PathBuf {
-    let candidate = dir.join(filename);
-    if !candidate.exists() {
-        return candidate;
+///
+/// Reserving is ATOMIC: we create the file with `create_new` (O_EXCL), which
+/// fails if it already exists. This closes a race where two concurrent
+/// downloads with the same name both pass an `exists()` check and then clobber
+/// each other. The created (empty) file is reused as the real output.
+pub(crate) async fn unique_path(dir: &Path, filename: &str) -> PathBuf {
+    use tokio::fs::OpenOptions;
+    // Try the plain name first, then numbered variants, claiming each atomically.
+    let try_claim = |path: PathBuf| async move {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(_) => Some(path),         // we won the race; file now exists (empty)
+            Err(_) => None,              // taken (or unwritable); try the next name
+        }
+    };
+
+    if let Some(p) = try_claim(dir.join(filename)).await {
+        return p;
     }
     let (stem, ext) = split_ext(filename);
-    for i in 1..10_000 {
+    for i in 1..100_000 {
         let name = match &ext {
             Some(e) => format!("{stem} ({i}).{e}"),
             None => format!("{stem} ({i})"),
         };
-        let candidate = dir.join(name);
-        if !candidate.exists() {
-            return candidate;
+        if let Some(p) = try_claim(dir.join(name)).await {
+            return p;
         }
     }
+    // Extremely unlikely fallback.
     dir.join(filename)
 }
 

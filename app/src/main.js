@@ -21,13 +21,35 @@ async function addDownload() {
     return;
   }
   const kind = document.getElementById("kind-select").value || null;
+  const queue = document.getElementById("queue-select").value || null;
   try {
-    const id = await invoke("start_download", { url, kind });
+    const id = await invoke("start_download", { url, kind, queue });
     const name = guessName(url);
     createItem(id, name);
     urlInput.value = "";
   } catch (e) {
     alert("Failed to start download: " + e);
+  }
+}
+
+// Global queue controls.
+document.getElementById("pause-all-btn").onclick = () => invoke("pause_all");
+document.getElementById("start-all-btn").onclick = () => invoke("start_all");
+
+// Populate the queue picker from settings.
+async function loadQueues() {
+  try {
+    const s = await invoke("get_settings");
+    const sel = document.getElementById("queue-select");
+    sel.innerHTML = "";
+    for (const q of s.queues || [{ id: "main", name: "Main" }]) {
+      const opt = document.createElement("option");
+      opt.value = q.id;
+      opt.textContent = q.name + (q.running === false ? " (paused)" : "");
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    console.warn("Could not load queues:", e);
   }
 }
 
@@ -125,8 +147,10 @@ function updateItem(p) {
 
 listen("progress", (event) => updateItem(event.payload));
 
-// Load any downloads persisted from a previous session, and apply the theme.
+// Load any downloads persisted from a previous session, apply the theme, and
+// populate the queue picker.
 restoreList();
+loadQueues();
 invoke("get_settings")
   .then((s) => applyTheme(s.theme || "system"))
   .catch(() => {});

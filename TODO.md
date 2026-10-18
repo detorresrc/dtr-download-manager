@@ -73,6 +73,24 @@ Implemented as a shared token-bucket `RateLimiter` (`engine/src/ratelimit.rs`).
       in host/app settings.
 - [x] **Theme** — `Settings.theme` (system/light/dark); applied by the app UI.
 
+## Tier 2 — Scheduler + multiple queues  — ✅ DONE
+
+- [x] **Multiple named queues** — `Settings.queues` (`Queue { id, name,
+      max_concurrent, running, schedule }`); each download has an optional
+      `queue` id (defaults to "main").
+- [x] **Scheduler** — the `Manager` runs a background tick loop that promotes
+      `Queued` downloads to running only when the queue is running,
+      schedule-active, and under its `max_concurrent`.
+- [x] **Time-window schedules** — `engine/src/schedule.rs`: enabled flag,
+      start/stop minute (wraps past midnight), active weekdays.
+- [x] **Queue controls** — `pause_all` / `start_all` / `pause_queue` /
+      `start_queue`, exposed via host messages and Tauri commands + UI buttons.
+- [x] Fixed a concurrency bug: `unique_path` now reserves names ATOMICALLY
+      (O_EXCL), so simultaneous downloads with the same name no longer clobber
+      each other.
+- [ ] Per-queue time-of-day in LOCAL time (currently UTC in the headless engine;
+      the app can pass local time explicitly).
+
 ## 4. Resume for HLS/DASH media downloads  — PLANNED
 
 Regular file downloads resume at the byte level (`.grabpart`). Media downloads

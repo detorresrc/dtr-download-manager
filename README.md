@@ -37,6 +37,11 @@ fallback to a single connection when the server doesn't support ranges.
 - **Persistent download queue** — the list of downloads is saved to disk, so it
   survives app/host restarts. Unfinished downloads are automatically re-queued
   and resumed on startup, writing to the *same* file (no collision copies).
+- **Multiple queues + scheduler (IDM-style)** — organize downloads into named
+  queues, each with its own concurrency limit and optional time-window schedule
+  (start/stop times, active weekdays). Pause/start individual queues or all at
+  once. A background scheduler starts queued downloads only when their queue is
+  running, schedule-active, and under its concurrency cap.
 - **Video / stream capture (HLS & DASH)** — point it at an `.m3u8` or `.mpd`
   and it parses the manifest, picks the highest-bandwidth rendition, downloads
   all media segments concurrently, and concatenates them into one file.
@@ -176,6 +181,16 @@ You can also change them from the extension popup. Keys:
 | `use_categories` | Auto-sort files into category subfolders | `true` |
 | `categories` | Extension → subfolder rules (first match wins) | Video/Audio/Documents/Programs/Archives/Images |
 | `theme` | UI theme: `system` / `light` / `dark` | `system` |
+| `queues` | Named queues: `id`, `name`, `max_concurrent`, `running`, `schedule` | one "Main" queue |
+
+### Queues & scheduling
+
+Each download belongs to a queue (default: **Main**). A queue has its own
+`max_concurrent` limit and an optional `schedule` (`enabled`, `start_minute`,
+`stop_minute`, active `days` Mon=0..Sun=6; windows may wrap past midnight). The
+engine's scheduler starts a queued download only when its queue is `running`,
+the schedule is active, and the queue is under its concurrency cap. Use the
+app's **Start all / Pause all** controls or per-queue start/pause.
 
 ### Download categories
 

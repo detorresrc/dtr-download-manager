@@ -54,12 +54,19 @@ pub struct DownloadRequest {
     /// handling) itself.
     #[serde(default)]
     pub resolved_target: Option<PathBuf>,
+    /// Which queue this download belongs to. Defaults to the main queue.
+    #[serde(default)]
+    pub queue: Option<String>,
 }
 
 impl DownloadRequest {
     /// The effective kind: the explicit one, or a guess from the URL.
     pub fn effective_kind(&self) -> DownloadKind {
         self.kind.unwrap_or_else(|| DownloadKind::guess_from_url(&self.url))
+    }
+    /// The queue id this download targets, defaulting to the main queue.
+    pub fn queue_id(&self) -> String {
+        self.queue.clone().unwrap_or_else(|| DEFAULT_QUEUE_ID.to_string())
     }
 }
 
@@ -73,6 +80,40 @@ pub enum Theme {
     Light,
     Dark,
 }
+
+/// A named download queue with its own concurrency limit and optional schedule.
+/// Downloads are assigned to a queue; the scheduler starts them subject to the
+/// queue's `max_concurrent`, its `running` flag, and its `schedule` window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Queue {
+    /// Stable identifier used by downloads to reference this queue.
+    pub id: String,
+    /// Human-readable name shown in the UI.
+    pub name: String,
+    /// Max downloads from THIS queue that may transfer at once.
+    pub max_concurrent: usize,
+    /// When false, the queue is manually paused and starts nothing.
+    #[serde(default = "default_true")]
+    pub running: bool,
+    /// Optional time-window schedule gating automatic starts.
+    #[serde(default)]
+    pub schedule: crate::schedule::Schedule,
+}
+
+impl Queue {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, max_concurrent: usize) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            max_concurrent: max_concurrent.max(1),
+            running: true,
+            schedule: crate::schedule::Schedule::default(),
+        }
+    }
+}
+
+/// The id of the built-in default queue that always exists.
+pub const DEFAULT_QUEUE_ID: &str = "main";
 
 /// A download category: files whose extension matches `extensions` are saved
 /// into `<download_dir>/<subfolder>` automatically (IDM-style auto-foldering).
@@ -116,6 +157,9 @@ pub struct Settings {
     /// UI theme preference (consumed by the app; stored here for one source of truth).
     #[serde(default)]
     pub theme: Theme,
+    /// Configured download queues. Always contains at least the main queue.
+    #[serde(default = "default_queues")]
+    pub queues: Vec<Queue>,
 }
 
 impl Default for Settings {
@@ -130,8 +174,14 @@ impl Default for Settings {
             categories: default_categories(),
             use_categories: true,
             theme: Theme::System,
+            queues: default_queues(),
         }
     }
+}
+
+/// The default set of queues: a single "main" queue using the global concurrency.
+fn default_queues() -> Vec<Queue> {
+    vec![Queue::new(DEFAULT_QUEUE_ID, "Main", 4)]
 }
 
 impl Settings {
@@ -157,6 +207,28 @@ impl Settings {
     /// Clamp the connection count to a sane range.
     pub fn effective_connections(&self) -> usize {
         self.max_connections_per_file.clamp(1, 32)
+    }
+
+    /// Look up a queue by id, falling back to the main queue, then to a
+    /// synthesized default if even that is missing.
+    pub fn queue(&self, id: &str) -> Queue {
+        self.queues
+            .iter()
+            .find(|q| q.id == id)
+            .or_else(|| self.queues.iter().find(|q| q.id == DEFAULT_QUEUE_ID))
+            .cloned()
+            .unwrap_or_else(|| Queue::new(DEFAULT_QUEUE_ID, "Main", self.max_concurrent_downloads))
+    }
+
+    /// Ensure the invariant that a main queue always exists; call after loading
+    /// or editing settings.
+    pub fn ensure_main_queue(&mut self) {
+        if !self.queues.iter().any(|q| q.id == DEFAULT_QUEUE_ID) {
+            self.queues.insert(
+                0,
+                Queue::new(DEFAULT_QUEUE_ID, "Main", self.max_concurrent_downloads),
+            );
+        }
     }
 }
 

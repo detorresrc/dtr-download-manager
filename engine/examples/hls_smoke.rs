@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         save_dir: None,
         kind: Some(DownloadKind::Hls),
             resolved_target: None,
+            queue: None,
     };
     let id = manager.enqueue(req).await;
     println!("enqueued {id}");

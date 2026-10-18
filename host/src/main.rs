@@ -47,6 +47,9 @@ enum Incoming {
         /// Optional explicit kind ("file" | "hls" | "dash"); guessed if absent.
         #[serde(default)]
         kind: Option<DownloadKind>,
+        /// Which queue to place the download in (defaults to the main queue).
+        #[serde(default)]
+        queue: Option<String>,
     },
     Pause {
         id: String,
@@ -62,6 +65,18 @@ enum Incoming {
     /// Remove a download from the persistent queue.
     Remove {
         id: String,
+    },
+    /// Pause every queue.
+    PauseAll,
+    /// Start/resume every queue.
+    StartAll,
+    /// Pause a single named queue.
+    PauseQueue {
+        queue: String,
+    },
+    /// Start a single named queue.
+    StartQueue {
+        queue: String,
     },
     Settings {
         #[serde(default)]
@@ -192,6 +207,7 @@ async fn handle_message(
             headers,
             save_dir,
             kind,
+            queue,
         } => {
             let req = DownloadRequest {
                 url,
@@ -200,6 +216,7 @@ async fn handle_message(
                 save_dir,
                 kind,
                 resolved_target: None,
+                queue,
             };
             let id = manager.enqueue(req).await;
             tracing::info!("enqueued {id}");
@@ -208,6 +225,10 @@ async fn handle_message(
         Incoming::Pause { id } => manager.pause(&id).await,
         Incoming::Resume { id } => manager.resume(&id).await,
         Incoming::Cancel { id } => manager.cancel(&id).await,
+        Incoming::PauseAll => manager.pause_all().await,
+        Incoming::StartAll => manager.start_all().await,
+        Incoming::PauseQueue { queue } => manager.pause_queue(&queue).await,
+        Incoming::StartQueue { queue } => manager.start_queue(&queue).await,
         Incoming::List => {
             let records = manager.records().await;
             let _ = out.send(serde_json::json!({ "type": "list", "downloads": records }));

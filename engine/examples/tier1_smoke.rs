@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
             save_dir: None, // let categories decide the folder
             kind: None,
             resolved_target: None,
+            queue: None,
         })
         .await;
     println!("enqueued {id}, cap = {} KiB/s", rate / 1024);
