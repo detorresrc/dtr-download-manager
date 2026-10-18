@@ -33,6 +33,20 @@
       #msg { font-size: 12px; min-height: 16px; color: #2d8a4e; }
       .foot { font-size: 11px; color: #888; margin-top: 8px; }
       a { color: #2d6cdf; cursor: pointer; }
+
+      /* Live download list */
+      #list { max-height: 280px; overflow-y: auto; margin: 4px 0 6px; }
+      #empty { font-size: 12px; color: #888; text-align: center; padding: 10px 0; }
+      .item { border: 1px solid #8883; border-radius: 8px; padding: 8px; margin-bottom: 7px; }
+      .item .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+      .item .name { font-size: 12px; font-weight: 600; word-break: break-all; }
+      .item .st { font-size: 11px; color: #888; white-space: nowrap; }
+      .item .st.completed { color: #2d8a4e; } .item .st.failed { color: #e25555; }
+      .bar { height: 5px; background: #8882; border-radius: 999px; overflow: hidden; margin: 6px 0 4px; }
+      .bar > span { display: block; height: 100%; width: 0%; background: #2d6cdf; transition: width .25s; }
+      .item .meta { display: flex; justify-content: space-between; font-size: 11px; color: #888; }
+      .item .acts { display: flex; gap: 4px; margin-top: 6px; }
+      .item .acts button { padding: 3px 8px; font-size: 11px; }
     </style>
   </head>
   <body>
@@ -49,8 +63,12 @@
     </div>
 
     <div id="msg"></div>
+
+    <div id="list"></div>
+    <div id="empty">No downloads yet.</div>
+
     <div class="foot">
-      Downloads are handled by the Grab desktop app. Manage settings there.
+      Full dashboard &amp; settings are in the Grab desktop app.
       <a id="open-options">Pairing / options</a>
     </div>
 
