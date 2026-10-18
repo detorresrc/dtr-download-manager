@@ -145,13 +145,31 @@ fn resolve_filename(req: &DownloadRequest, final_url: &str, headers: &HeaderMap)
             return sanitize(hint);
         }
     }
-    // Last resort: a bare URL path segment (no extension) is still better than nothing.
+    // Last resort: a bare URL path segment (no extension) — but ONLY if it looks
+    // like a plausible short name, not an opaque token (e.g. a 100-char proxy
+    // path like `t1_J8pu5_TELX1B...`). A junk token is worse than a generic name.
     if let Some(name) = filename_from_url(final_url) {
-        if !name.is_empty() {
+        if plausible_bare_name(&name) {
             return sanitize(&name);
         }
     }
     "download".to_string()
+}
+
+/// A bare (extensionless) path segment is only acceptable as a filename if it's
+/// short and doesn't look like an opaque download token.
+fn plausible_bare_name(name: &str) -> bool {
+    let name = name.trim();
+    // Too long → almost certainly a token/hash, not a human filename.
+    if name.is_empty() || name.len() > 40 {
+        return false;
+    }
+    // Reject if it's dominated by token-ish separators / looks random.
+    let underscores = name.matches('_').count();
+    if underscores >= 2 {
+        return false;
+    }
+    true
 }
 
 /// A heuristic: does this look like an actual filename with a sensible
@@ -334,5 +352,30 @@ mod tests {
         let req = req_with(None);
         let name = resolve_filename(&req, "https://cdn.com/files/archive.tar.gz", &HeaderMap::new());
         assert_eq!(name, "archive.tar.gz");
+    }
+
+    #[test]
+    fn content_disposition_resolves_tokenized_proxy_url() {
+        // Real-world case: dlproxy tokenized URL with no filename in the path;
+        // the server provides the name via Content-Disposition (seen on the probe).
+        let req = req_with(None);
+        let url = "https://tunnel5.dlproxy.uk/download/t1_J8pu5_TELX1B?sig=AL8kzhG";
+        let mut h = HeaderMap::new();
+        h.insert(
+            CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment; filename=\"PPSA21783.exfat\""),
+        );
+        assert_eq!(resolve_filename(&req, url, &h), "PPSA21783.exfat");
+    }
+
+    #[test]
+    fn tokenized_url_without_cd_does_not_use_junk_path_segment() {
+        // Same URL but NO Content-Disposition: the token path segment has no
+        // real extension, so we must NOT name the file after it.
+        let req = req_with(None);
+        let url = "https://tunnel5.dlproxy.uk/download/t1_J8pu5_TELX1B?sig=AL8kzhG";
+        let name = resolve_filename(&req, url, &HeaderMap::new());
+        // Falls through to the generic name rather than "t1_J8pu5_TELX1B".
+        assert_eq!(name, "download");
     }
 }
