@@ -17,3 +17,11 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
+# Localhost HTTP API (optional; enabled by the `http` feature). Kept in the
+# engine crate so it can be fully exercised in headless CI without the GUI.
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.6", features = ["cors"], optional = true }
+
+[features]
+default = ["http"]
+http = ["dep:axum", "dep:tower-http"]
