@@ -61,7 +61,7 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
 
 ---
 
-### Phase 1 — HTTP API in the app  `[~]`  (engine side done & verified here)
+### Phase 1 — HTTP API in the app  `[x]`  (done & verified here)
 - [x] Add `axum` localhost server (in engine crate, feature `http`, reusable by app) — *verified: live*
 - [x] Bearer-token auth (reject all but `/ping` without valid token) — *verified: live 401*
 - [x] CORS: `OPTIONS` preflight + allow headers/methods/origin — *verified: live preflight 200*
@@ -70,11 +70,10 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
 - [x] `GET /downloads` → `[records]` — *verified: live*
 - [x] `POST /downloads/:id/pause` | `/resume` | `/cancel` — *verified: live*
 - [x] `DELETE /downloads/:id` — *verified: live*
-- [ ] Wire the server into `grab-app` startup (needs app build on desktop)
-- [ ] Generate + persist a random auth token on first run (app side)
-- [ ] Port configurable via Settings (app side)
-- Note: core server + auth + CORS fully proven via `examples/http_smoke.rs`;
-  remaining items are app-side wiring, done in Phase 2.
+- [x] Wire the server into `grab-app` startup (done in Phase 2)
+- [x] Generate + persist a random auth token on first run (done in Phase 2)
+- [ ] Port configurable via Settings (small follow-up; fixed 17654 for now)
+- Note: core server + auth + CORS fully proven via `examples/http_smoke.rs`.
 
 ### Phase 2 — Tray + lifecycle  `[~]`  (code done; visible behavior = your Windows)
 - [x] Wire HTTP API into app startup (serves on 127.0.0.1:17654)
@@ -93,14 +92,16 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
   verify tray, close-to-tray, autostart, single-instance visually (can't run GUI here).
 - [ ] Make API port configurable in Settings (currently fixed 17654)
 
-### Phase 3 — Rework the Chrome extension  `[ ]`  (code here; verify in Chrome)
-- [ ] Replace native messaging with `fetch()` to the HTTP API
-- [ ] `host_permissions: ["http://127.0.0.1:17654/*"]`
-- [ ] Send bearer token; options page to paste/store it
-- [ ] Only cancel Chrome's own download AFTER the app accepts the handoff
-- [ ] App-down: catch fetch error → notify + let Chrome download normally
-- [ ] Popup: 🟢/🔴 status via `GET /ping`
-- [ ] Keep forwarding cookies/headers/referer + suggested filename
+### Phase 3 — Rework the Chrome extension  `[~]`  (code done; verify in Chrome)
+- [x] Replace native messaging with `fetch()` to the HTTP API — *contract verified here*
+- [x] `host_permissions` for `http://127.0.0.1/*` + `localhost`; dropped `nativeMessaging`
+- [x] Send bearer token; `options.html`/`options.js` to paste/store port + token + "Test connection"
+- [x] Only cancel Chrome's own download AFTER the app accepts the handoff — *fallback intact*
+- [x] App-down: catch fetch error → notify + let Chrome download normally
+- [x] Popup: 🟢/🔴 status via `GET /ping`
+- [x] Keep forwarding cookies/headers/referer + suggested filename
+- Note: manifest + all JS validated; the POST/ping/401 contract exercised against
+  the real server here. **Needs your Chrome to verify the live round-trip.**
 
 ### Phase 4 — Remove the old host  `[ ]`  (here)
 - [ ] Delete `host/` crate and workspace member
