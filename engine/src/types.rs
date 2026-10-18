@@ -302,6 +302,20 @@ pub enum Status {
     Canceled,
 }
 
+/// A control action requested on a download by ANOTHER process (the GUI) that
+/// doesn't own the live transfer. It's written into the shared queue record;
+/// the process that actually runs the download (the native host) polls for it,
+/// applies it to its live handle, and clears the field. This is how the GUI's
+/// pause/resume/cancel/remove buttons reach downloads running in the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingAction {
+    Pause,
+    Resume,
+    Cancel,
+    Remove,
+}
+
 /// A persisted record of a download, so the queue survives app/host restarts.
 ///
 /// This holds everything needed to resume or re-run a download later: the
@@ -333,6 +347,10 @@ pub struct DownloadRecord {
     /// Unix epoch seconds when the record was created (for ordering/history).
     #[serde(default)]
     pub created_at: u64,
+    /// A control action requested by another process (the GUI). The owning
+    /// process applies and clears it. `None` when there's nothing pending.
+    #[serde(default)]
+    pub pending_action: Option<PendingAction>,
 }
 
 impl DownloadRecord {
@@ -348,6 +366,7 @@ impl DownloadRecord {
             eta_secs: None,
             error: None,
             created_at: now_secs(),
+            pending_action: None,
         }
     }
 

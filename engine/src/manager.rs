@@ -363,6 +363,31 @@ impl Manager {
         self.inner.registry.remove(id).await;
     }
 
+    /// Record a control action requested by another process (the GUI) into the
+    /// shared queue file, for the owning process to apply. Used by the app when
+    /// its own engine doesn't own the live download.
+    pub async fn request_action(&self, id: &str, action: crate::types::PendingAction) {
+        self.inner.registry.request_action(id, action).await;
+    }
+
+    /// Apply any pending control actions written to the shared queue file by
+    /// another process (the GUI). Called periodically by the owning process
+    /// (the host) so GUI buttons reach downloads this engine actually runs.
+    pub async fn apply_pending_actions(&self) {
+        use crate::types::PendingAction;
+        for (id, action) in self.inner.registry.take_pending_actions().await {
+            match action {
+                PendingAction::Pause => self.pause(&id).await,
+                PendingAction::Resume => self.resume(&id).await,
+                PendingAction::Cancel => self.cancel(&id).await,
+                PendingAction::Remove => {
+                    self.cancel(&id).await;
+                    self.forget(&id).await;
+                }
+            }
+        }
+    }
+
     pub async fn records(&self) -> Vec<DownloadRecord> {
         self.inner.registry.all().await
     }

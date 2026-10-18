@@ -24,6 +24,7 @@ pub use schedule::Schedule;
 pub use segment::{plan, Segment};
 pub use state::DownloadState;
 pub use types::{
-    Category, DownloadKind, DownloadRecord, DownloadRequest, Progress, ProbeResult, Queue,
+    Category, DownloadKind, DownloadRecord, DownloadRequest, PendingAction, Progress, ProbeResult,
+    Queue,
     Settings, Status, Theme, DEFAULT_QUEUE_ID,
 };
