@@ -320,6 +320,14 @@ pub struct DownloadRecord {
     pub downloaded: u64,
     #[serde(default)]
     pub total: Option<u64>,
+    /// Last known smoothed speed in bytes/sec (persisted so the GUI, which reads
+    /// this file, can show speed for downloads run by another process e.g. the
+    /// browser's native host). 0 when not actively downloading.
+    #[serde(default)]
+    pub speed: u64,
+    /// Last known estimated seconds remaining. `None` when unknown/stalled.
+    #[serde(default)]
+    pub eta_secs: Option<u64>,
     #[serde(default)]
     pub error: Option<String>,
     /// Unix epoch seconds when the record was created (for ordering/history).
@@ -336,6 +344,8 @@ impl DownloadRecord {
             status: Status::Queued,
             downloaded: 0,
             total: None,
+            speed: 0,
+            eta_secs: None,
             error: None,
             created_at: now_secs(),
         }

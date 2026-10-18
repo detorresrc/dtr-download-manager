@@ -94,9 +94,7 @@ impl Manager {
             let inner2 = inner.clone();
             tokio::spawn(async move {
                 while let Some(p) = internal_rx.recv().await {
-                    registry
-                        .update(&p.id, p.status, p.downloaded, p.total, p.error.clone())
-                        .await;
+                    registry.update(&p).await;
                     if matches!(
                         p.status,
                         Status::Completed | Status::Failed | Status::Canceled | Status::Paused
@@ -200,7 +198,7 @@ impl Manager {
             // Reset to Queued so the scheduler governs the restart.
             self.inner
                 .registry
-                .update(&record.id, Status::Queued, record.downloaded, record.total, None)
+                .set_status(&record.id, Status::Queued)
                 .await;
             ids.push(record.id.clone());
         }
@@ -279,11 +277,10 @@ impl Manager {
             }
         };
         if !live {
-            if let Some(r) = self.inner.registry.all().await.into_iter().find(|r| r.id == id) {
-                self.inner
-                    .registry
-                    .update(id, Status::Queued, r.downloaded, r.total, None)
-                    .await;
+            // Only re-queue if the download actually exists in the registry.
+            let exists = self.inner.registry.all().await.iter().any(|r| r.id == id);
+            if exists {
+                self.inner.registry.set_status(id, Status::Queued).await;
                 self.tick().await;
             }
         }
@@ -327,7 +324,7 @@ impl Manager {
             if r.request.queue_id() == queue_id && r.status == Status::Paused {
                 self.inner
                     .registry
-                    .update(&r.id, Status::Queued, r.downloaded, r.total, None)
+                    .set_status(&r.id, Status::Queued)
                     .await;
             }
         }

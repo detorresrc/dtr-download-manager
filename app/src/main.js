@@ -137,7 +137,11 @@ async function refreshFromQueue() {
       status: r.status,
       downloaded: r.downloaded || 0,
       total: r.total,
-      speed: 0,
+      // speed/eta are persisted in the queue file by whichever process is
+      // running the download (e.g. the browser's native host), so browser-
+      // driven rows show live stats too.
+      speed: r.speed || 0,
+      eta_secs: r.eta_secs ?? null,
       connections: 0,
       error: r.error,
     });
