@@ -4,6 +4,8 @@
 //! native-messaging host that talks to the browser extension.
 
 pub mod download;
+#[cfg(feature = "http")]
+pub mod http_api;
 pub mod manager;
 pub mod media;
 pub mod media_download;

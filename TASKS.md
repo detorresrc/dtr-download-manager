@@ -61,18 +61,20 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
 
 ---
 
-### Phase 1 — HTTP API in the app  `[ ]`  (fully testable here w/ curl)
-- [ ] Add `axum` localhost server bound to `127.0.0.1:<port>` in `grab-app`
-- [ ] Generate + persist a random auth token on first run
-- [ ] Bearer-token auth middleware (reject all but `/ping` without valid token)
-- [ ] CORS: handle `OPTIONS` preflight + allow headers/methods/origin
-- [ ] `GET /ping` → `{ok, version}` (no auth)
-- [ ] `POST /downloads` → `{id}` (url, headers, filename, kind, queue)
-- [ ] `GET /downloads` → `[records]`
-- [ ] `POST /downloads/:id/pause` | `/resume` | `/cancel`
-- [ ] `DELETE /downloads/:id`
-- [ ] Port configurable via Settings
-- [ ] Verify with curl: happy path, 401 without token, CORS preflight, "app down" (connection refused)
+### Phase 1 — HTTP API in the app  `[~]`  (engine side done & verified here)
+- [x] Add `axum` localhost server (in engine crate, feature `http`, reusable by app) — *verified: live*
+- [x] Bearer-token auth (reject all but `/ping` without valid token) — *verified: live 401*
+- [x] CORS: `OPTIONS` preflight + allow headers/methods/origin — *verified: live preflight 200*
+- [x] `GET /ping` → `{ok, version}` (no auth) — *verified: live*
+- [x] `POST /downloads` → `{id}` (url, headers, filename, kind, queue) — *verified: live*
+- [x] `GET /downloads` → `[records]` — *verified: live*
+- [x] `POST /downloads/:id/pause` | `/resume` | `/cancel` — *verified: live*
+- [x] `DELETE /downloads/:id` — *verified: live*
+- [ ] Wire the server into `grab-app` startup (needs app build on desktop)
+- [ ] Generate + persist a random auth token on first run (app side)
+- [ ] Port configurable via Settings (app side)
+- Note: core server + auth + CORS fully proven via `examples/http_smoke.rs`;
+  remaining items are app-side wiring, done in Phase 2.
 
 ### Phase 2 — Tray + lifecycle  `[ ]`  (code here; visible behavior = your Windows)
 - [ ] System tray icon + menu (Open · Pause all · Resume all · Quit)
