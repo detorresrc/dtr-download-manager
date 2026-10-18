@@ -1,9 +1,24 @@
 // Grab desktop frontend. Talks to the Rust backend via Tauri's invoke/event
-// APIs (exposed on window.__TAURI__ when withGlobalTauri is on, but we import
-// from the module to be explicit).
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
-const { open } = window.__TAURI__.dialog;
+// Tauri 2 exposes these on window.__TAURI__ only when `app.withGlobalTauri` is
+// true in tauri.conf.json. Guard it so that, if the global is somehow missing,
+// we show a clear on-screen error instead of a silently blank window (the whole
+// script would otherwise die on the first undefined access).
+const TAURI = window.__TAURI__;
+if (!TAURI || !TAURI.core) {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.body.innerHTML =
+      '<div style="font-family:system-ui;padding:24px;color:#e25555">' +
+      "<h2>Grab failed to initialize</h2>" +
+      "<p>The Tauri API (<code>window.__TAURI__</code>) is not available. " +
+      "This usually means <code>app.withGlobalTauri</code> is not enabled in " +
+      "<code>tauri.conf.json</code>, or the app is being opened as a plain file " +
+      "instead of run via <code>tauri dev</code> / the built app.</p></div>";
+  });
+  throw new Error("window.__TAURI__ unavailable (withGlobalTauri not enabled?)");
+}
+const { invoke } = TAURI.core;
+const { listen } = TAURI.event;
+const { open } = (TAURI.dialog || {});
 
 const downloads = new Map(); // id -> { el, name }
 
