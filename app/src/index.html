@@ -59,6 +59,22 @@
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+          <input id="s-autostart" type="checkbox" style="width:auto;" />
+          Start Grab on login (keeps it ready to catch browser downloads)
+        </label>
+
+        <fieldset style="margin-top:14px;border:1px solid var(--border);border-radius:8px;padding:10px;">
+          <legend style="font-size:12px;color:var(--muted);">Browser extension pairing</legend>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+            Paste these into the Grab extension's options to connect it.
+          </div>
+          <label>API URL</label>
+          <input id="s-api-url" type="text" readonly />
+          <label>Token</label>
+          <input id="s-api-token" type="text" readonly />
+        </fieldset>
+
         <div class="row end">
           <button value="cancel" class="ghost">Cancel</button>
           <button id="s-save" value="save">Save</button>

@@ -76,15 +76,22 @@ running (tray + autostart), exposing a localhost HTTP API the extension calls.
 - Note: core server + auth + CORS fully proven via `examples/http_smoke.rs`;
   remaining items are app-side wiring, done in Phase 2.
 
-### Phase 2 — Tray + lifecycle  `[ ]`  (code here; visible behavior = your Windows)
-- [ ] System tray icon + menu (Open · Pause all · Resume all · Quit)
-- [ ] Close button → hide to tray (engine keeps running)
-- [ ] `tauri-plugin-single-instance` (second launch focuses running one)
-- [ ] `tauri-plugin-autostart` + Settings toggle
-- [ ] Start hidden in tray when launched via autostart
-- [ ] Raise/focus window on new `POST /downloads` (point 4)
-- [ ] First-run prompt: "Start Grab on boot?"
-- [ ] "Ask before downloading" setting + review popup
+### Phase 2 — Tray + lifecycle  `[~]`  (code done; visible behavior = your Windows)
+- [x] Wire HTTP API into app startup (serves on 127.0.0.1:17654)
+- [x] Generate + persist random auth token (`<config>/api_token`); shown in Settings
+- [x] App is now the single engine — calls `restore()` on startup
+- [x] System tray icon + menu (Open · Pause all · Resume all · Quit)
+- [x] Close button → hide to tray (engine + API keep running)
+- [x] `tauri-plugin-single-instance` (second launch focuses running one)
+- [x] `tauri-plugin-autostart` + Settings toggle (`set_autostart`/`is_autostart_enabled`)
+- [x] Start hidden in tray when launched via `--autostarted`
+- [x] Raise/focus window on first progress event of a new download (point 4)
+- [x] Settings UI: autostart toggle + API pairing (URL + token) display
+- [ ] First-run prompt "Start Grab on boot?" — deferred (toggle in Settings for now)
+- [ ] "Ask before downloading" setting + review popup — deferred to Phase 3 polish
+- Note: Tauri 2 API usage reviewed/confirmed; **needs your Windows machine** to
+  verify tray, close-to-tray, autostart, single-instance visually (can't run GUI here).
+- [ ] Make API port configurable in Settings (currently fixed 17654)
 
 ### Phase 3 — Rework the Chrome extension  `[ ]`  (code here; verify in Chrome)
 - [ ] Replace native messaging with `fetch()` to the HTTP API
