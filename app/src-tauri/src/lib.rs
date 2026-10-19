@@ -228,6 +228,21 @@ pub fn run() {
             // System tray: quick actions + show/hide the window.
             build_tray(app.handle())?;
 
+            // Self-heal autostart: if the user enabled it but the OS entry is
+            // gone (Windows sometimes drops the Run-key after a boot —
+            // plugins-workspace#771), re-assert it now.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                if wants_autostart() {
+                    let al = app.autolaunch();
+                    if let Ok(false) = al.is_enabled() {
+                        if let Err(e) = al.enable() {
+                            eprintln!("could not re-assert autostart: {e}");
+                        }
+                    }
+                }
+            }
+
             // If launched at login (--autostarted), start hidden in the tray so
             // it's not intrusive; otherwise show the window.
             let autostarted = std::env::args().any(|a| a == "--autostarted");
@@ -422,23 +437,51 @@ async fn get_api_info(state: State<'_, Arc<AppState>>) -> Result<serde_json::Val
     }))
 }
 
+/// Path of the small file that records whether the user wants autostart on.
+/// Used to re-assert the OS entry on startup (defends against Windows removing
+/// the Run-key after a boot — plugins-workspace#771).
+fn autostart_pref_path() -> PathBuf {
+    config_dir().join("autostart_enabled")
+}
+
+fn save_autostart_pref(enabled: bool) {
+    let path = autostart_pref_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, if enabled { "1" } else { "0" });
+}
+
+fn wants_autostart() -> bool {
+    std::fs::read_to_string(autostart_pref_path())
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false)
+}
+
 /// Enable or disable launching Grab at login.
 #[tauri::command]
 async fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();
-    if enabled {
-        mgr.enable().map_err(|e| e.to_string())
+    let result = if enabled {
+        mgr.enable()
     } else {
-        mgr.disable().map_err(|e| e.to_string())
-    }
+        mgr.disable()
+    };
+    result.map_err(|e| e.to_string())?;
+    // Remember the user's intent so we can re-assert it on next startup.
+    save_autostart_pref(enabled);
+    Ok(())
 }
 
-/// Whether autostart is currently enabled.
+/// Whether autostart is currently enabled. Reflects the OS state, but also the
+/// saved intent so the checkbox isn't misleading if the OS entry was dropped
+/// (startup self-heal re-asserts it anyway).
 #[tauri::command]
 async fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    let os_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    Ok(os_enabled || wants_autostart())
 }
 
 /// Quit the whole app (used by the tray "Quit" item — the window close button
