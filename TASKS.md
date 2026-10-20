@@ -104,7 +104,9 @@ Ordered by suggested priority:
 3. [ ] **yt-dlp / site-video downloading** — shell out to `yt-dlp` (+ `ffmpeg`)
        for YouTube/SoundCloud/Bandcamp etc. Full design in TODO.md. Compliance:
        legitimate content only; no DRM circumvention.
-4. [ ] Configurable API port in Settings (fixed at 17654 now).
+4. [x] Configurable API port in Settings — persisted to `<config>/api_port`,
+       server binds it on launch, Settings has a port field (restart to apply).
+       *(engine custom-port bind verified live)*
 5. [ ] First-run "Start Grab on boot?" prompt (toggle exists in Settings).
 6. [ ] "Ask before downloading" review popup (auto-accept is default).
 7. [ ] Per-download speed limit (global done).
