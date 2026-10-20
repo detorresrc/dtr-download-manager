@@ -172,7 +172,7 @@ pub fn run() {
             let queue_path = config_dir().join("queue.json");
             let settings = load_settings(&settings_path);
             let api_token = load_or_create_token();
-            let api_port = DEFAULT_API_PORT;
+            let api_port = load_api_port();
 
             // The app is now the SINGLE engine, so it resumes unfinished
             // downloads itself (no separate host process anymore).
@@ -278,6 +278,7 @@ pub fn run() {
             pause_queue,
             start_queue,
             get_api_info,
+            set_api_port,
             set_autostart,
             is_autostart_enabled,
             quit_app
@@ -427,6 +428,24 @@ fn load_or_create_token() -> String {
     token
 }
 
+/// Load the HTTP API port from `<config>/api_port`, defaulting to the fixed
+/// default. Invalid/empty contents fall back to the default.
+fn load_api_port() -> u16 {
+    std::fs::read_to_string(config_dir().join("api_port"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u16>().ok())
+        .filter(|&p| p >= 1024) // avoid privileged ports
+        .unwrap_or(DEFAULT_API_PORT)
+}
+
+fn save_api_port(port: u16) -> Result<(), String> {
+    let path = config_dir().join("api_port");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, port.to_string()).map_err(|e| e.to_string())
+}
+
 /// Pairing info the Settings UI shows so the user can connect the extension.
 #[tauri::command]
 async fn get_api_info(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, String> {
@@ -435,6 +454,17 @@ async fn get_api_info(state: State<'_, Arc<AppState>>) -> Result<serde_json::Val
         "token": state.api_token,
         "base_url": format!("http://127.0.0.1:{}", state.api_port),
     }))
+}
+
+/// Change the HTTP API port. Persisted immediately; takes effect after a
+/// restart (the server binds the port once at launch). Returns the new port.
+#[tauri::command]
+async fn set_api_port(port: u16) -> Result<u16, String> {
+    if port < 1024 {
+        return Err("Port must be 1024 or higher.".into());
+    }
+    save_api_port(port)?;
+    Ok(port)
 }
 
 /// Path of the small file that records whether the user wants autostart on.

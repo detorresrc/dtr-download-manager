@@ -249,8 +249,10 @@ document.getElementById("settings-btn").onclick = async () => {
   } catch {}
   try {
     const api = await invoke("get_api_info");
-    document.getElementById("s-api-url").value = api.base_url;
+    document.getElementById("s-api-port").value = api.port;
+    document.getElementById("s-api-port").dataset.current = String(api.port);
     document.getElementById("s-api-token").value = api.token;
+    document.getElementById("s-port-note").textContent = "";
   } catch {}
 
   dialog.showModal();
@@ -286,6 +288,17 @@ dialog.addEventListener("close", async () => {
     await invoke("set_autostart", {
       enabled: document.getElementById("s-autostart").checked,
     });
+    // Apply the API port if it changed (takes effect after a restart).
+    const portEl = document.getElementById("s-api-port");
+    const newPort = parseInt(portEl.value, 10);
+    const curPort = parseInt(portEl.dataset.current || "0", 10);
+    if (Number.isFinite(newPort) && newPort !== curPort) {
+      await invoke("set_api_port", { port: newPort });
+      alert(
+        `API port set to ${newPort}. Restart Grab for it to take effect, then ` +
+        `update the port in the browser extension's options.`
+      );
+    }
   } catch (e) {
     alert("Failed to save settings: " + e);
   }
